@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestão de Produtos - Açougue</title>
+    <style>
+        /* Reset básico */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: url('https://source.unsplash.com/featured/?butcher-shop') no-repeat center center fixed;
+            background-size: cover;
+            color: #333;
+            padding: 1rem;
+        }
+        .container {
+            max-width: 1200px;
+            margin: auto;
+            background: rgba(255,255,255,0.95);
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+            padding: 2rem;
+        }
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 2rem;
+        }
+        .header img {
+            width: 60px;
+        }
+        .header h1 {
+            color: #8B0000;
+            font-size: 2rem;
+        }
+        .nav {
+            display: flex;
+            gap: 1rem;
+        }
+        .nav a {
+            text-decoration: none;
+            color: #8B0000;
+            font-weight: bold;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            transition: background 0.3s;
+        }
+        .nav a:hover {
+            background: rgba(139,0,0,0.1);
+        }
+        .filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            align-items: center;
+        }
+        .filters input,
+        .filters select {
+            padding: 0.5rem;
+            border: 2px solid #ccc;
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+        .filters button {
+            padding: 0.6rem 1.2rem;
+            background: #8B0000;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+        .filters button:hover {
+            background: #6e0000;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 0.75rem;
+            border: 1px solid #ccc;
+            text-align: left;
+        }
+        th {
+            background: #f8f8f8;
+            color: #8B0000;
+        }
+        td img {
+            width: 50px;
+            height: 50px;
+            object-fit: cover;
+            border-radius: 4px;
+        }
+        .actions a {
+            margin-right: 0.5rem;
+            text-decoration: none;
+            color: #fff;
+            background: #8B0000;
+            padding: 0.3rem 0.6rem;
+            border-radius: 4px;
+            transition: background 0.3s;
+            font-size: 0.9rem;
+        }
+        .actions a:hover {
+            background: #6e0000;
+        }
+        @media (max-width: 768px) {
+            .filters { flex-direction: column; align-items: stretch; }
+            th, td { font-size: 0.9rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div style="display:flex; align-items:center; gap:1rem;">
+                <img src="/static/img/logo-acougue.png" alt="Logo Açougue">
+                <h1>Produtos</h1>
+            </div>
+            <nav class="nav">
+                <a href="{{ url_for('dashboard') }}">Dashboard</a>
+                <a href="{{ url_for('listar_produtos') }}">Produtos</a>
+                <a href="{{ url_for('novo_produto') }}">+ Novo Produto</a>
+                <a href="{{ url_for('logout') }}">Sair</a>
+            </nav>
+        </div>
+        <form method="GET" class="filters">
+            <input type="text" name="search" placeholder="Buscar por nome ou código" value="{{ request.args.get('search', '') }}">
+            <select name="categoria">
+                <option value="">Todas Categorias</option>
+                {% for cat in categorias %}
+                    <option value="{{ cat }}" {% if request.args.get('categoria') == cat %}selected{% endif %}>{{ cat }}</option>
+                {% endfor %}
+            </select>
+            <button type="submit">Filtrar</button>
+        </form>
+        <table>
+            <thead>
+                <tr>
+                    <th>Foto</th>
+                    <th>Nome</th>
+                    <th>Categoria</th>
+                    <th>Preço</th>
+                    <th>Quantidade</th>
+                    <th>Fornecedor</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in produtos %}
+                <tr>
+                    <td>
+                        {% if p.foto %}
+                            <img src="{{ url_for('static', filename='uploads/' ~ p.foto) }}" alt="{{ p.nome }}">
+                        {% else %}
+                            –
+                        {% endif %}
+                    </td>
+                    <td>{{ p.nome }}</td>
+                    <td>{{ p.categoria }}</td>
+                    <td>R$ {{ '%.2f'|format(p.preco) }}</td>
+                    <td>{{ p.quantidade }}</td>
+                    <td>{{ p.fornecedor or '–' }}</td>
+                    <td class="actions">
+                        <a href="{{ url_for('editar_produto', id=p.id) }}">Editar</a>
+                        <a href="{{ url_for('excluir_produto', id=p.id) }}" onclick="return confirm('Deseja realmente excluir?')">Excluir</a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" style="text-align:center;">Nenhum produto encontrado</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</body>
+</html>

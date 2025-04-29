@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Açougue</title>
+    <style>
+        /* Reset básico */
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: url('https://source.unsplash.com/featured/?butcher-shop') no-repeat center center fixed;
+            background-size: cover;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+        .login-container {
+            background: rgba(255, 255, 255, 0.9);
+            padding: 2rem;
+            border-radius: 12px;
+            width: 320px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            text-align: center;
+        }
+        .login-container img {
+            width: 200px;
+            margin-bottom: 1rem;
+        }
+        .login-container h1 {
+            color: #8B0000;
+            margin-bottom: 1.5rem;
+            font-size: 1.8rem;
+        }
+        .login-container .input-group {
+            margin-bottom: 1rem;
+            text-align: left;
+        }
+        .login-container label {
+            display: block;
+            margin-bottom: 0.3rem;
+            color: #555;
+        }
+        .login-container input {
+            width: 100%;
+            padding: 0.5rem;
+            border: 2px solid #ccc;
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+        .login-container input:focus {
+            border-color: #8B0000;
+            outline: none;
+        }
+        .login-container button {
+            width: 100%;
+            padding: 0.7rem;
+            background-color: #8B0000;
+            border: none;
+            border-radius: 6px;
+            color: #fff;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+        .login-container button:hover {
+            background-color: #6e0000;
+        }
+        .error-msg {
+            color: #E74C3C;
+            margin-bottom: 1rem;
+        }
+        @media (max-width: 400px) {
+            .login-container { width: 90%; }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <!-- Logo do açougue -->
+        <img src="/static/img/logo-acougue.png" alt="Logo Açougue">
+        <h1>Área de Login</h1>
+        {% if error %}
+            <p class="error-msg">{{ error }}</p>
+        {% endif %}
+        <form method="POST" action="{{ url_for('login') }}">
+            <div class="input-group">
+                <label for="username">Usuário</label>
+                <input type="text" id="username" name="username" placeholder="Digite seu usuário" required>
+            </div>
+            <div class="input-group">
+                <label for="password">Senha</label>
+                <input type="password" id="password" name="password" placeholder="Digite sua senha" required>
+            </div>
+            <button type="submit">Entrar</button>
+        </form>
+    </div>
+</body>
+</html>

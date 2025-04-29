@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Fornecedores</h2>
+    
+    <div class="d-flex justify-content-between mb-3">
+        <a href="{{ url_for('novo_fornecedor') }}" class="btn btn-success">
+            + Novo Fornecedor
+        </a>
+        <form method="GET" class="d-flex">
+            <input type="text" name="search" class="form-control me-2" 
+                   placeholder="Buscar por nome ou CNPJ" value="{{ request.args.get('search', '') }}">
+            <button type="submit" class="btn btn-primary">Buscar</button>
+        </form>
+    </div>
+
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Nome</th>
+                <th>CNPJ</th>
+                <th>Contato</th>
+                <th>Endereço</th>
+                <th>Ações</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for f in fornecedores %}
+            <tr>
+                <td>{{ f.nome }}</td>
+                <td>{{ f.cnpj }}</td>
+                <td>{{ f.contato }}</td>
+                <td>{{ f.endereco or '–' }}</td>
+                <td>
+                    <a href="{{ url_for('editar_fornecedor', id=f.id) }}" 
+                       class="btn btn-sm btn-warning">Editar</a>
+                    <form method="POST" action="{{ url_for('excluir_fornecedor', id=f.id) }}" 
+                          class="d-inline">
+                        <button type="submit" class="btn btn-sm btn-danger" 
+                                onclick="return confirm('Tem certeza?')">Excluir</button>
+                    </form>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="5" class="text-center">Nenhum fornecedor encontrado</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

@@ -1,0 +1,276 @@
+{% extends 'base.html' %}
+
+{% block title %}Nova Venda{% endblock %}
+
+{% block head %}
+<style>
+    .container-venda {
+        max-width: 1200px;
+        margin: 20px auto;
+        background: rgba(255,255,255,0.95);
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        padding: 2rem;
+    }
+    .grid-venda {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 2rem;
+    }
+    .produto-item {
+        cursor: pointer;
+        transition: all 0.3s;
+    }
+    .produto-item:hover {
+        background-color: #f8f9fa;
+    }
+    .carrinho {
+        background: #fff;
+        border: 2px solid #8B0000;
+        border-radius: 8px;
+        padding: 1rem;
+        position: sticky;
+        top: 1rem;
+    }
+    .quantidade-input {
+        width: 70px;
+        padding: 0.3rem;
+        text-align: center;
+    }
+    .badge-estoque {
+        font-size: 0.8rem;
+        background: #8B0000;
+        color: white;
+    }
+    #total-venda {
+        font-size: 1.5rem;
+        color: #8B0000;
+        font-weight: bold;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+
+    <div class="header mb-4">
+        <h1>Nova Venda</h1>
+    </div>
+
+    <div class="grid-venda">
+        <!-- Seção de Produtos -->
+        <div>
+            <!-- Modifique a linha do produto para incluir data-tipo -->
+
+            <div class="mb-3">
+                <input type="text" id="filtro-produto" class="form-control" 
+                       placeholder="Buscar produto...">
+            </div>
+
+            <table class="table">
+                <thead>
+                    <tr>
+                        <th>Produto</th>
+                        <th>Preço</th>
+                        <th>Estoque</th>
+                        
+                        <th>Ação</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for p in produtos %}
+                    <tr class="produto-item" data-id="{{ p.id }}" data-preco="{{ p.preco }}" 
+                        data-estoque="{{ p.quantidade }}" data-tipo="{{ p.tipo_venda }}">
+                        <td>{{ p.nome }}</td>
+                        <td>R$ {{ "%.2f"|format(p.preco) }}</td>
+                        <td>
+                            <span class="badge badge-estoque">
+                                {{ p.quantidade }} {% if p.tipo_venda == 'quilo' %}KG{% else %}unid.{% endif %}
+                            </span>
+                        </td>
+                        <td>
+                            <input type="number" min="1" max="{{ p.quantidade }}" 
+                                class="quantidade-input" value="1">
+                            <button class="btn btn-sm btn-success btn-adicionar">
+                                <i class="fas fa-cart-plus"></i>
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Carrinho e Finalização -->
+        <div class="carrinho">
+            <h4 class="mb-3">Carrinho</h4>
+            
+            <form id="form-venda">
+                <!-- Novo campo adicionado aqui -->
+                <div class="mb-3">
+                    <label>Nome do Cliente</label>
+                    <input type="text" name="nome_cliente" class="form-control" 
+                        placeholder="Nome completo do cliente">
+                </div>
+
+                <div class="mb-3">
+                    <label>CPF do Cliente</label>
+                    <input type="text" name="cpf" class="form-control" 
+                        placeholder="000.000.000-00">
+                </div>
+                
+
+                <div class="mb-3">
+                    <label>Método de Pagamento</label>
+                    <select name="metodo_pagamento" class="form-control">
+                        <option value="Dinheiro">Dinheiro</option>
+                        <option value="Cartão Débito">Cartão Débito</option>
+                        <option value="Cartão Crédito">Cartão Crédito</option>
+                        <option value="PIX">PIX</option>
+                    </select>
+                </div>
+
+                <div id="itens-carrinho" class="mb-3">
+                    <!-- Itens serão adicionados dinamicamente aqui -->
+                </div>
+
+                <div class="total-section mb-3">
+                    <h5>Total: <span id="total-venda">R$ 0,00</span></h5>
+                </div>
+
+                <button type="submit" class="btn btn-block btn-primary">
+                    Finalizar Venda
+                </button>
+            </form>
+        </div>
+    </div>
+
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+    const carrinho = {};
+    const form = document.getElementById('form-venda');
+    
+    // Filtro de produtos
+    document.getElementById('filtro-produto').addEventListener('input', function(e) {
+        const filtro = e.target.value.toLowerCase();
+        document.querySelectorAll('.produto-item').forEach(row => {
+            const nome = row.children[0].textContent.toLowerCase();
+            row.style.display = nome.includes(filtro) ? '' : 'none';
+        });
+    });
+
+    // Adicionar ao carrinho
+    document.querySelectorAll('.btn-adicionar').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            const row = e.target.closest('.produto-item');
+            const tipo = row.dataset.tipo;
+            
+            let quantidade;
+            if (tipo === 'quilo') {
+                const peso = prompt("Informe o peso em quilos:");
+                quantidade = parseFloat(peso);
+            } else {
+                quantidade = parseInt(row.querySelector('input').value);
+            }
+            const id = row.dataset.id;
+            const preco = parseFloat(row.dataset.preco);
+            
+            const estoque = parseInt(row.dataset.estoque);
+
+            if (quantidade > estoque) {
+                alert('Quantidade indisponível em estoque!');
+                return;
+            }
+
+            if (carrinho[id]) {
+                carrinho[id].quantidade += quantidade;
+            } else {
+                carrinho[id] = {
+                    nome: row.children[0].textContent,
+                    preco: preco,
+                    quantidade: quantidade
+                };
+            }
+
+            atualizarCarrinho();
+        });
+    });
+
+    // Atualizar exibição do carrinho
+    function atualizarCarrinho() {
+        const container = document.getElementById('itens-carrinho');
+        let html = '';
+        let total = 0;
+
+        for (const [id, item] of Object.entries(carrinho)) {
+            total += item.preco * item.quantidade;
+            html += `
+                <div class="item-carrinho mb-2" data-id="${id}">
+                    ${item.nome} 
+                    (${item.quantidade} x R$ ${item.preco.toFixed(2)}) 
+                    <button type="button" class="btn btn-sm btn-danger btn-remover">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            `;
+        }
+
+        container.innerHTML = html;
+        document.getElementById('total-venda').textContent = 
+            `R$ ${total.toFixed(2)}`.replace('.', ',');
+
+        // Adicionar eventos de remoção
+        document.querySelectorAll('.btn-remover').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = e.target.closest('.item-carrinho').dataset.id;
+                delete carrinho[id];
+                atualizarCarrinho();
+            });
+        });
+    }
+
+    // Enviar venda
+    form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        
+        const itens = Object.entries(carrinho).map(([id, item]) => ({
+            id: parseInt(id),
+            preco: item.preco,
+            quantidade: item.quantidade
+        }));
+
+        if (itens.length === 0) {
+            alert('Adicione itens ao carrinho!');
+            return;
+        }
+
+        try {
+            const response = await fetch("{{ url_for('nova_venda') }}", {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    nome_cliente: form.nome_cliente.value,
+                    cpf: form.cpf.value,
+                    metodo_pagamento: form.metodo_pagamento.value,
+                    itens: itens
+                })
+            });
+
+            const result = await response.json();
+            
+            if (result.success) {
+                alert(`Venda registrada! ID: ${result.venda_id}`);
+                window.location.reload();
+            } else {
+                alert(`Erro: ${result.error}`);
+            }
+        } catch (error) {
+            alert('Erro ao processar venda!');
+            console.error(error);
+        }
+    });
+});
+</script>
+{% endblock %}
