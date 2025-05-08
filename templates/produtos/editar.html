@@ -88,11 +88,13 @@
         <div class="mb-3">
             <label class="form-label">Foto do Produto</label>
             <input type="file" class="form-control" name="foto">
+            <!-- Adicionar verificação para exibição da imagem -->
             {% if produto.foto %}
             <div class="mt-2">
                 <img src="{{ url_for('static', filename='uploads/produtos/' + produto.foto) }}" 
-                     alt="Foto atual" 
-                     style="max-width: 200px;">
+                    alt="Foto atual" 
+                    style="max-width: 200px;">
+                <p class="text-muted mt-1">Imagem atual</p>
             </div>
             {% endif %}
         </div>

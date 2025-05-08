@@ -1,0 +1,100 @@
+{% extends 'base.html' %}
+
+{% block title %}Novo Produto{% endblock %}
+
+{% block head %}
+<style>
+    /* Você pode adicionar estilos customizados aqui */
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1 class="mb-4">Cadastrar Novo Produto</h1>
+
+    <form method="POST" enctype="multipart/form-data">
+        <!-- Nome -->
+        <div class="form-group mb-3">
+            <label for="nome">Nome:</label>
+            <input type="text" class="form-control" id="nome" name="nome" required>
+        </div>
+
+        <!-- Descrição -->
+        <div class="form-group mb-3">
+            <label for="descricao">Descrição:</label>
+            <textarea class="form-control" id="descricao" name="descricao" rows="3"></textarea>
+        </div>
+
+        <!-- Categoria -->
+        <div class="form-group mb-3">
+            <label for="categoria">Categoria:</label>
+            <input type="text" class="form-control" id="categoria" name="categoria" required>
+        </div>
+
+        <!-- Preço -->
+        <div class="form-group mb-3">
+            <label for="preco">Preço (R$):</label>
+            <input type="number" class="form-control" id="preco" name="preco" step="0.01" min="0" required>
+        </div>
+
+        <!-- Quantidade -->
+        <div class="form-group mb-3">
+            <label for="quantidade">Quantidade:</label>
+            <input type="number" class="form-control" id="quantidade" name="quantidade" min="0" required>
+        </div>
+
+        <!-- Tipo de Venda -->
+        <div class="form-group mb-3">
+            <label for="tipo_venda">Tipo de Venda:</label>
+            <select class="form-control" id="tipo_venda" name="tipo_venda" required>
+                <option value="">Selecione o tipo</option>
+                <option value="unidade" {% if request.form.get('tipo_venda') == 'unidade' %}selected{% endif %}>Unidade</option>
+                <option value="quilo" {% if request.form.get('tipo_venda') == 'quilo' %}selected{% endif %}>Quilo</option>
+            </select>
+        </div>
+
+        <!-- Estoque Mínimo -->
+        <div class="form-group mb-3">
+            <label for="estoque_minimo">Estoque Mínimo:</label>
+            <input type="number" class="form-control" id="estoque_minimo" name="estoque_minimo" min="0">
+        </div>
+
+        <!-- Código de Barras -->
+        <div class="form-group mb-3">
+            <label for="codigo_barras">Código de Barras:</label>
+            <input type="text" class="form-control" id="codigo_barras" name="codigo_barras">
+        </div>
+
+        <!-- Fornecedor -->
+        <div class="form-group mb-3">
+            <label for="fornecedor_id">Fornecedor:</label>
+            <select class="form-control" id="fornecedor_id" name="fornecedor_id">
+                <option value="">Selecione um fornecedor</option>
+                {% for fornecedor in fornecedores %}
+                    <option value="{{ fornecedor.id }}">{{ fornecedor.nome }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- Data de Validade -->
+        <div class="form-group mb-3">
+            <label for="data_validade">Data de Validade:</label>
+            <input type="date" class="form-control" id="data_validade" name="data_validade">
+        </div>
+
+        <!-- Foto -->
+        <div class="form-group mb-4">
+            <label for="foto">Foto do Produto:</label>
+            <input type="file" class="form-control" id="foto" name="foto" accept="image/*">
+        </div>
+
+        <!-- Botão de Envio -->
+        <button type="submit" class="btn btn-primary">Cadastrar Produto</button>
+
+        <!-- Mensagem de Erro -->
+        {% if error %}
+            <div class="alert alert-danger mt-3">{{ error }}</div>
+        {% endif %}
+    </form>
+</div>
+{% endblock %}

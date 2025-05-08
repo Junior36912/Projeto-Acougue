@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h2 style="color: #8B0000; margin-bottom: 1.5rem;">Cadastrar Novo Usuário</h2>
+    
+    {% if error %}
+        <div class="alert alert-danger">{{ error }}</div>
+    {% endif %}
+    
+    <form method="POST" action="{{ url_for('novo_usuario') }}">
+        <div class="mb-3">
+            <label for="username" class="form-label">Username</label>
+            <input type="text" class="form-control" id="username" name="username" required
+                   value="{{ form_data.username if form_data }}">
+        </div>
+        
+        <div class="mb-3">
+            <label for="email" class="form-label">Email</label>
+            <input type="email" class="form-control" id="email" name="email" required
+                   value="{{ form_data.email if form_data }}">
+        </div>
+        
+        <div class="mb-3">
+            <label for="password" class="form-label">Senha</label>
+            <input type="password" class="form-control" id="password" name="password" required
+                   minlength="6">
+            <div class="form-text">Mínimo de 6 caracteres</div>
+        </div>
+        
+        <div class="mb-3">
+            <label for="role" class="form-label">Cargo</label>
+            <select class="form-select" id="role" name="role" required>
+                <option value="gerente">Gerente</option>
+                <option value="funcionario" selected>Funcionário</option>
+            </select>
+        </div>
+        
+        <button type="submit" class="btn btn-primary">Cadastrar</button>
+        <a href="{{ url_for('admin_usuarios') }}" class="btn btn-secondary">Cancelar</a>
+    </form>
+</div>
+
+<style>
+    .container {
+        max-width: 600px;
+    }
+    .form-control, .form-select {
+        border: 1px solid #8B0000;
+    }
+    .btn-primary {
+        background-color: #8B0000;
+        border-color: #8B0000;
+    }
+    .btn-primary:hover {
+        background-color: #A52A2A;
+        border-color: #A52A2A;
+    }
+</style>
+{% endblock %}

@@ -1,0 +1,153 @@
+{% extends 'base.html' %}
+
+{% block title %}Vendas a Prazo{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="mb-0">Vendas a Prazo</h2>
+        <div class="total-info d-flex gap-2">
+            <span class="badge bg-primary fs-6">Total: {{ total_vendas }}</span>
+            <span class="badge bg-warning text-dark fs-6">Pendentes: {{ total_pendentes }}</span>
+            <span class="badge bg-danger fs-6">Valor: {{ total_valor_pendente|format_currency }}</span>
+        </div>
+    </div>
+
+    {% include 'flash_messages.html' %}
+
+    <!-- Filtro Alfabético  e com nome-->
+    <div class="card mb-4 shadow-sm">
+        <div class="card-body py-2">
+            <form method="GET" action="{{ url_for('listar_vendas_prazo') }}">
+                <div class="input-group">
+                    <select name="cliente_filter" 
+                            class="form-select" 
+                            onchange="this.form.submit()"
+                            title="Filtrar por cliente específico">
+                        <option value="">Todos os Clientes</option>
+                        {% for cliente in clientes %}
+                            <option value="{{ cliente }}" 
+                                {% if request.args.get('cliente_filter') == cliente %}selected{% endif %}>
+                                {{ cliente }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                    <button type="button" 
+                            class="btn btn-outline-secondary" 
+                            onclick="this.form.cliente_filter.value=''; this.form.submit()"
+                            title="Remover filtro de cliente">
+                        Limpar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Tabela de Vendas -->
+    <div class="card shadow-lg">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 15%">Cliente</th>
+                            <th style="width: 12%">Data Compra</th>
+                            <th style="width: 20%">Itens</th>
+                            <th class="text-end" style="width: 10%">Total</th>
+                            <th style="width: 12%">Vencimento</th>
+                            <th style="width: 10%">Status</th>
+                            <th style="width: 18%">Observação</th>
+                            <th style="width: 13%">Ações</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for venda in vendas %}
+                        <tr class="{% if venda.vencida %}table-warning{% endif %}">
+                            <td class="fw-semibold">{{ venda.cliente_nome }}</td>
+                            <td>
+                                <div class="text-secondary">
+                                    {{ venda.data.strftime('%d/%m/%Y') if venda.data else '-' }}
+                                </div>
+                                <small class="text-muted">
+                                    {{ venda.data.strftime('%H:%M') if venda.data else '' }}
+                                </small>
+                            </td>
+                            <td>
+                                {% if venda.itens %}
+                                <div class="d-flex flex-column gap-1">
+                                    {% for item in venda.itens %}
+                                    <div class="d-flex justify-content-between">
+                                        <span class="text-truncate" style="max-width: 120px">{{ item.nome }}</span>
+                                        <span class="badge bg-light text-dark">
+                                            {{ item.quantidade }}x {{ item.preco_unitario|format_currency }}
+                                        </span>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                {% else %}
+                                <span class="text-muted fst-italic">Sem itens</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end fw-bold text-success">
+                                {{ venda.total|format_currency }}
+                            </td>
+                            <td>
+                                <div class="d-flex align-items-center gap-1">
+                                    {{ venda.data_vencimento.strftime('%d/%m/%Y') if venda.data_vencimento else '-' }}
+                                    {% if venda.vencida %}
+                                    <i class="bi bi-exclamation-triangle-fill text-danger"></i>
+                                    {% endif %}
+                                </div>
+                            </td>
+                            <td>
+                                <span class="badge rounded-pill bg-{% if venda.status_pagamento == 'pendente' %}warning{% else %}success{% endif %}">
+                                    {{ 'Pendente' if venda.status_pagamento == 'pendente' else 'Pago' }}
+                                </span>
+                            </td>
+                            <td>
+                                <form method="POST" action="{{ url_for('adicionar_observacao_venda_prazo', venda_id=venda.id) }}">
+                                    <div class="input-group">
+                                        <textarea name="observacao" 
+                                                  class="form-control form-control-sm" 
+                                                  rows="2"
+                                                  placeholder="Adicionar observação..."
+                                                  style="min-height: 60px">{{ venda.observacao or '' }}</textarea>
+                                    </div>
+                                    <button type="submit" class="btn btn-sm btn-primary mt-1 w-100">
+                                        <i class="bi bi-save me-1"></i>Salvar
+                                    </button>
+                                </form>
+                            </td>
+                            <td class="text-center">
+                                {% if venda.status_pagamento == 'pendente' %}
+                                <form method="POST" action="{{ url_for('pagar_venda_prazo', venda_id=venda.id) }}">
+                                    <button type="submit" class="btn btn-sm btn-success w-100">
+                                        <i class="bi bi-check2-circle me-1"></i>Pagar
+                                    </button>
+                                </form>
+                                {% else %}
+                                <span class="text-muted small">Finalizado</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="8" class="text-center py-4">
+                                <div class="text-muted fst-italic">
+                                    <i class="bi bi-database-exclamation me-2"></i>
+                                    Nenhuma venda encontrada
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    
+</style>
+{% endblock %}

@@ -3,85 +3,50 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     <title>{% block title %}Açougue{% endblock %}</title>
-    <style>
-        /* Reset básico */
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: url('/static/img/background-butcher.jpg') no-repeat center center fixed;
-            background-size: cover;
-            color: #333;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-        }
-        header {
-            background: rgba(255, 255, 255, 0.9);
-            padding: 1rem 2rem;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-        header img {
-            height: 100px;
-        }
-        nav a {
-            margin-left: 1rem;
-            text-decoration: none;
-            color: #8B0000;
-            font-weight: 600;
-            transition: color 0.2s;
-        }
-        nav a:hover {
-            color: #6e0000;
-        }
-        main {
-            flex: 1;
-            padding: 2rem;
-            max-width: 1200px;
-            margin: auto;
-            background: rgba(255,255,255,0.95);
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-        }
-        footer {
-            background: rgba(255, 255, 255, 0.9);
-            text-align: center;
-            padding: 1rem;
-            font-size: 0.9rem;
-            color: #555;
-            box-shadow: 0 -2px 8px rgba(0,0,0,0.1);
-        }
-        @media (max-width: 600px) {
-            header, main, footer { padding: 1rem; }
-            nav a { margin-left: 0.5rem; font-size: 0.9rem; }
-        }
-    </style>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
     {% block head %}{% endblock %}
 </head>
 <body>
-    <header>
-        <div style="display:flex; align-items:center;">
-            <img src="{{ url_for('static', filename='img/logo-acougue.png') }}" alt="Logo Açougue">
-            <h1 style="margin-left:1rem; color:#8B0000; font-size:1.5rem;">Açougue</h1>
+    <header class="header-main">
+        <div class="header-brand">
+            <img src="{{ url_for('static', filename='img/logo-acougue.png') }}" alt="Logo Açougue" class="logo">
+            <h1 class="site-title">Açougue</h1>
         </div>
-        <nav>
-            <a href="{{ url_for('dashboard') }}">Dashboard</a>
-            <a href="{{ url_for('listar_produtos') }}">Produtos</a>
-            <a href="{{ url_for('listar_fornecedores') }}">Fornecedores</a>
-            <a href="{{ url_for('logout') }}">Sair</a>
+        
+        <nav class="main-nav">
+            <a href="{{ url_for('dashboard') }}" class="nav-link"><i class="fas fa-home"></i> Dashboard</a>
+            <a href="{{ url_for('listar_produtos') }}" class="nav-link"><i class="fas fa-box-open"></i> Produtos</a>
+            <a href="{{ url_for('listar_fornecedores') }}" class="nav-link"><i class="fas fa-truck"></i> Fornecedores</a>
+            <a href="{{ url_for('logout') }}" class="nav-link btn-danger"><i class="fas fa-sign-out-alt"></i> Sair</a>
         </nav>
     </header>
-    <main>
+
+    <main class="container main-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
         
         {% block content %}{% endblock %}
     </main>
-    <footer>
-        &copy; {{ current_year }} Açougue - Todos os direitos reservados
+
+    <footer class="main-footer">
+        <div class="footer-content">
+            <p class="copyright">&copy; {{ current_year }} Açougue - Todos os direitos reservados</p>
+            <div class="footer-links">
+                <a href="#" class="footer-link">Política de Privacidade</a>
+                <a href="#" class="footer-link">Termos de Uso</a>
+            </div>
+        </div>
     </footer>
+
     {% block scripts %}{% endblock %}
 </body>
 </html>

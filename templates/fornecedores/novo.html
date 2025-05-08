@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h2 style="color: #8B0000; margin-bottom: 1.5rem;">Cadastrar Novo Fornecedor</h2>
+    
+    {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+    {% endif %}
+
+    <form method="POST" class="form-container">
+        <div class="form-group">
+            <label for="nome">Nome do Fornecedor *</label>
+            <input type="text" class="form-control" id="nome" name="nome" 
+                   value="{{ form_data.nome if form_data }}" required>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group col-md-6">
+                <label for="cnpj">CNPJ *</label>
+                <input type="text" class="form-control cnpj-mask" id="cnpj" name="cnpj"
+                       value="{{ form_data.cnpj if form_data }}" required>
+            </div>
+            <div class="form-group col-md-6">
+                <label for="contato">Contato *</label>
+                <input type="text" class="form-control phone-mask" id="contato" name="contato"
+                       value="{{ form_data.contato if form_data }}" required>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="endereco">Endereço</label>
+            <textarea class="form-control" id="endereco" name="endereco" 
+                      rows="3">{{ form_data.endereco if form_data }}</textarea>
+        </div>
+
+        <div class="form-buttons">
+            <button type="submit" class="btn btn-primary">
+                <i class="fas fa-save"></i> Salvar
+            </button>
+            <a href="{{ url_for('listar_fornecedores') }}" class="btn btn-secondary">
+                <i class="fas fa-times"></i> Cancelar
+            </a>
+        </div>
+    </form>
+</div>
+
+<style>
+</style>
+
+<script>
+    // Máscara para CNPJ
+    document.getElementById('cnpj').addEventListener('input', function(e) {
+        let value = e.target.value.replace(/\D/g, '');
+        if (value.length > 14) value = value.slice(0,14);
+        value = value.replace(/(\d{2})(\d)/, '$1.$2')
+                     .replace(/(\d{3})(\d)/, '$1.$2')
+                     .replace(/(\d{3})(\d)/, '$1/$2')
+                     .replace(/(\d{4})(\d)/, '$1-$2');
+        e.target.value = value;
+    });
+
+    // Máscara para telefone
+    document.getElementById('contato').addEventListener('input', function(e) {
+        let value = e.target.value.replace(/\D/g, '');
+        if (value.length > 11) value = value.slice(0,11);
+        if (value.length <= 10) {
+            value = value.replace(/(\d{2})(\d)/, '($1) $2')
+                          .replace(/(\d{4})(\d)/, '$1-$2');
+        } else {
+            value = value.replace(/(\d{2})(\d)/, '($1) $2')
+                          .replace(/(\d{5})(\d)/, '$1-$2');
+        }
+        e.target.value = value;
+    });
+</script>
+{% endblock %}

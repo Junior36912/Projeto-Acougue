@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container">
+    <h2 style="color: #8B0000; margin-bottom: 1.5rem;">Editar Fornecedor</h2>
+    
+    {% if error %}
+    <div class="alert alert-danger">{{ error }}</div>
+    {% endif %}
+
+    <form method="POST" class="form-container">
+        <div class="form-group">
+            <label for="nome">Nome do Fornecedor *</label>
+            <input type="text" class="form-control" id="nome" name="nome" 
+                   value="{{ fornecedor.nome }}" required>
+        </div>
+
+        <div class="form-row">
+            <div class="form-group col-md-6">
+                <label for="cnpj">CNPJ *</label>
+                <input type="text" class="form-control cnpj-mask" id="cnpj" name="cnpj"
+                       value="{{ fornecedor.cnpj }}" required>
+            </div>
+            <div class="form-group col-md-6">
+                <label for="contato">Contato *</label>
+                <input type="text" class="form-control phone-mask" id="contato" name="contato"
+                       value="{{ fornecedor.contato }}" required>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="endereco">Endereço</label>
+            <textarea class="form-control" id="endereco" name="endereco" 
+                      rows="3">{{ fornecedor.endereco or '' }}</textarea>
+        </div>
+
+        <div class="form-buttons">
+            <button type="submit" class="btn btn-primary">
+                <i class="fas fa-save"></i> Salvar Alterações
+            </button>
+            <a href="{{ url_for('listar_fornecedores') }}" class="btn btn-secondary">
+                <i class="fas fa-times"></i> Cancelar
+            </a>
+        </div>
+    </form>
+</div>
+
+<style>
+    .form-container {
+        background: #f8f9fa;
+        padding: 2rem;
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .form-buttons {
+        margin-top: 1.5rem;
+        display: flex;
+        gap: 1rem;
+        justify-content: flex-end;
+    }
+</style>
+
+<script>
+    // Máscara para CNPJ
+    document.getElementById('cnpj').addEventListener('input', function(e) {
+        let value = e.target.value.replace(/\D/g, '');
+        if (value.length > 14) value = value.slice(0,14);
+        value = value.replace(/(\d{2})(\d)/, '$1.$2')
+                     .replace(/(\d{3})(\d)/, '$1.$2')
+                     .replace(/(\d{3})(\d)/, '$1/$2')
+                     .replace(/(\d{4})(\d)/, '$1-$2');
+        e.target.value = value;
+    });
+
+    // Máscara para telefone
+    document.getElementById('contato').addEventListener('input', function(e) {
+        let value = e.target.value.replace(/\D/g, '');
+        if (value.length > 11) value = value.slice(0,11);
+        if (value.length <= 10) {
+            value = value.replace(/(\d{2})(\d)/, '($1) $2')
+                          .replace(/(\d{4})(\d)/, '$1-$2');
+        } else {
+            value = value.replace(/(\d{2})(\d)/, '($1) $2')
+                          .replace(/(\d{5})(\d)/, '$1-$2');
+        }
+        e.target.value = value;
+    });
+
+    // Formatar valores iniciais ao carregar a página
+    document.addEventListener('DOMContentLoaded', function() {
+        const formatarCNPJ = (valor) => {
+            return valor.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+        };
+
+        const formatarTelefone = (valor) => {
+            if (valor.length === 10) {
+                return valor.replace(/(\d{2})(\d{4})(\d{4})/, "($1) $2-$3");
+            }
+            return valor.replace(/(\d{2})(\d{5})(\d{4})/, "($1) $2-$3");
+        };
+
+        const cnpjInput = document.getElementById('cnpj');
+        const contatoInput = document.getElementById('contato');
+
+        // Aplicar formatação inicial
+        if (cnpjInput.value) {
+            cnpjInput.value = formatarCNPJ(cnpjInput.value.padEnd(14, '0'));
+        }
+        if (contatoInput.value) {
+            contatoInput.value = formatarTelefone(contatoInput.value.padEnd(11, '0'));
+        }
+    });
+</script>
+{% endblock %}

@@ -1,156 +1,85 @@
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard do Gerente - Açougue</title>
-    <style>
-        /* Reset básico */
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: url('https://source.unsplash.com/featured/?butcher-shop') no-repeat center center fixed;
-            background-size: cover;
-            color: #333;
-            padding: 2rem;
-        }
-        .dashboard-container {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
-            max-width: 1200px;
-            margin: auto;
-            padding: 2rem;
-        }
-        .dashboard-header {
-            display: flex;
-            align-items: center;
-            margin-bottom: 2rem;
-        }
-        .dashboard-header img {
-            width: 60px;
-            margin-right: 1rem;
-        }
-        .dashboard-header h1 {
-            font-size: 2rem;
-            color: #8B0000;
-        }
-        .cards {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1.5rem;
-            margin-bottom: 2rem;
-        }
-        .card {
-            background: #fff;
-            border: 2px solid #8B0000;
-            border-radius: 8px;
-            padding: 1rem;
-            text-align: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-        .card h2 {
-            margin-bottom: 0.5rem;
-            font-size: 1.2rem;
-            color: #8B0000;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 2rem;
-        }
-        th, td {
-            padding: 0.75rem;
-            border: 1px solid #ccc;
-            text-align: left;
-        }
-        th {
-            background-color: #f8f8f8;
-            color: #8B0000;
-        }
-        @media (max-width: 600px) {
-            .cards { grid-template-columns: 1fr; }
-        }
-    </style>
-</head>
-<body>
-    <div class="dashboard-container">
-        <div class="dashboard-header">
-            <img src="/static/img/logo-acougue.png" alt="Logo Açougue">
-            <h1>Dashboard do Gerente</h1>
+{% extends "base.html" %}
+
+{% block title %}Dashboard do Gerente - Açougue{% endblock %}
+
+{% block head %}
+<style>
+
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <!-- Cards de resumo -->
+    <div class="cards">
+        <div class="card">
+            <h2>Total de Vendas</h2>
+            <p>{{ total_vendas }}</p>
         </div>
-
-        <!-- Cards de resumo -->
-        <div class="cards">
-            <div class="card">
-                <h2>Total de Vendas</h2>
-                <p>{{ total_vendas }}</p>
-            </div>
-            <div class="card">
-                <h2>Vendas Hoje</h2>
-                <p>{{ vendas_hoje }}</p>
-            </div>
-            <div class="card">
-                <h2>Produtos em Falta</h2>
-                <p>{{ total_produtos_falta }}</p>
-            </div>
-            <div class="card">
-                <h2>Receita Mensal</h2>
-                <p>R$ {{ receita_mensal }}</p>
-            </div>
+        <div class="card">
+            <h2>Vendas Hoje</h2>
+            <p>{{ vendas_hoje }}</p>
         </div>
-
-        <!-- Alertas de estoque -->
-        <section>
-            <h2 style="color: #8B0000; margin-bottom: 1rem;">Produtos com Estoque Baixo</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Produto</th>
-                        <th>Quantidade</th>
-                        <th>Estoque Mínimo</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for produto in alertas_estoque %}
-                    <tr>
-                        <td>{{ produto.nome }}</td>
-                        <td>{{ produto.quantidade }}</td>
-                        <td>{{ produto.estoque_minimo }}</td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="3" style="text-align:center;">Nenhum alerta</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </section>
-
-        <!-- Ranking de produtos -->
-        <section>
-            <h2 style="color: #8B0000; margin-bottom: 1rem;">Top 5 Produtos Mais Vendidos</h2>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Produto</th>
-                        <th>Quantidade Vendida</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in ranking_produtos %}
-                    <tr>
-                        <td>{{ item.nome }}</td>
-                        <td>{{ item.quantidade_vendida }}</td>
-                    </tr>
-                    {% else %}
-                    <tr>
-                        <td colspan="2" style="text-align:center;">Sem dados</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </section>
+        <div class="card">
+            <h2>Produtos em Falta</h2>
+            <p>{{ total_produtos_falta }}</p>
+        </div>
+        <div class="card">
+            <h2>Receita Mensal</h2>
+            <p>R$ {{ receita_mensal }}</p>
+        </div>
     </div>
-</body>
-</html>
+
+    <!-- Alertas de estoque -->
+    <section>
+        <h2 style="color: #8B0000; margin-bottom: 1rem;">Produtos com Estoque Baixo</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Produto</th>
+                    <th>Quantidade</th>
+                    <th>Estoque Mínimo</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for produto in alertas_estoque %}
+                <tr>
+                    <td>{{ produto.nome }}</td>
+                    <td>{{ produto.quantidade }}</td>
+                    <td>{{ produto.estoque_minimo }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="3" style="text-align:center;">Nenhum alerta</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <!-- Ranking de produtos -->
+    <section>
+        <h2 style="color: #8B0000; margin-bottom: 1rem;">Top 5 Produtos Mais Vendidos</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>Produto</th>
+                    <th>Quantidade Vendida</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for item in ranking_produtos %}
+                <tr>
+                    <td>{{ item.nome }}</td>
+                    <td>{{ item.quantidade_vendida }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="2" style="text-align:center;">Sem dados</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+</div>
+{% endblock %}
