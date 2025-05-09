@@ -1,3 +1,6 @@
+import shutil
+from datetime import datetime
+from apscheduler.schedulers.background import BackgroundScheduler
 from gerador_pdf import gerar_relatorio_pdf
 from collections import defaultdict
 from app_logging import registrar_log
@@ -38,16 +41,50 @@ app.config['UPLOAD_FOLDER'] = os.path.abspath(app.config['UPLOAD_FOLDER'])
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 
+def backup_db():
+    """Rotina de backup do banco de dados"""
+    try:
+        # Configurar diretório de backups
+        backup_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'backups')
+        os.makedirs(backup_dir, exist_ok=True)
+        
+        # Gerar nome do arquivo com timestamp
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        backup_name = f"acougue_backup_{timestamp}.db"
+        backup_path = os.path.join(backup_dir, backup_name)
+        
+        # Usar backup via API do SQLite para maior segurança
+        src = sqlite3.connect(app.config['DATABASE'])
+        dst = sqlite3.connect(backup_path)
+        
+        with dst:
+            src.backup(dst)
+        
+        src.close()
+        dst.close()
+        
+        # Manter apenas últimos 7 backups
+        backups = sorted([f for f in os.listdir(backup_dir) if f.endswith('.db')])
+        while len(backups) > 7:
+            os.remove(os.path.join(backup_dir, backups.pop(0)))
+        
+        logging.info(f"Backup realizado: {backup_name}")
+    except Exception as e:
+        logging.error(f"Erro no backup: {str(e)}", exc_info=True)
+
+
+scheduler = BackgroundScheduler(daemon=True)
+scheduler.add_job(backup_db, 'interval', hours=24)
+
+
 @app.route('/')
 def index():
     if 'user_id' in session:
         return render_template('index.html')
     return redirect(url_for('login'))
 
-# ---------------------------------------------------------------
-# Sistema de Autenticação
-# ---------------------------------------------------------------
 
+# Sistema de Autenticação
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -917,23 +954,6 @@ def dashboard():
         return render_template('dashboard_funcionario.html', alertas=alertas_estoque)
     
 
-# Utilitários
-
-@app.context_processor
-def utility_processor():
-    return {
-        'format_currency': lambda value: f"R$ {value:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'),
-        'now': datetime.now
-    }
-
-
-@app.template_filter('format_currency')
-def format_currency(value):
-    try:
-        return f"R$ {float(value):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    except (ValueError, TypeError):
-        return "R$ 0,00"
-
 
 @app.route('/vendas/listar_vendas_prazo')
 @login_required
@@ -1200,5 +1220,72 @@ def excluir_usuario(id):
         return redirect(url_for('admin_usuarios', error='Erro ao excluir usuário'))
 
 
+
+# Utilitários
+
+@app.context_processor
+def utility_processor():
+    return {
+        'format_currency': lambda value: f"R$ {value:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'),
+        'now': datetime.now
+    }
+
+
+@app.template_filter('format_currency')
+def format_currency(value):
+    try:
+        return f"R$ {float(value):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except (ValueError, TypeError):
+        return "R$ 0,00"
+
+# Adicione no app.py
+from datetime import timedelta
+
+def verificar_validades():
+    """Verifica produtos próximos do vencimento"""
+    try:
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            hoje = datetime.now().date()
+            limite = hoje + timedelta(days=30)  # 30 dias de antecedência
+            
+            cursor.execute('''
+                SELECT id, nome, data_validade,
+                       JULIANDAY(data_validade) - JULIANDAY(?) AS dias_restantes
+                FROM produtos
+                WHERE data_validade BETWEEN ? AND ?
+                ORDER BY data_validade ASC
+            ''', (hoje, hoje, limite))
+            
+            produtos = cursor.fetchall()
+            
+            for produto in produtos:
+                registrar_log(
+                    user_id='Sistema',
+                    acao='alerta_validade',
+                    nivel='WARNING',
+                    detalhes={
+                        'produto_id': produto['id'],
+                        'nome': produto['nome'],
+                        'data_validade': produto['data_validade'],
+                        'dias_para_vencer': produto['dias_restantes']
+                    }
+                )
+            
+            logging.info(f"Verificação de validades: {len(produtos)} alertas gerados")
+    except Exception as e:
+        logging.error(f"Erro na verificação de validades: {str(e)}", exc_info=True)
+
+# Agendar verificação diária
+scheduler.add_job(verificar_validades, 'interval', hours=24)
+
+
 if __name__ == '__main__':
-    app.run(debug=True)
+    try:
+        scheduler.start()
+        # Executar verificações imediatamente ao iniciar
+        backup_db()
+        verificar_validades()
+        app.run(debug=True)
+    except (KeyboardInterrupt, SystemExit):
+        scheduler.shutdown()
