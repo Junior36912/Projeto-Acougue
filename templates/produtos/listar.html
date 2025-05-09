@@ -37,16 +37,13 @@
                 {% for p in produtos %}
                 <tr>
                     <td>
-                        {% if produto.foto %}
-                        <img src="{{ url_for('static', filename='uploads/produtos/' + produto.foto) }}" 
-                            alt="{{ produto.nome }}" 
-                            class="img-produto">
+                        {% if p.foto %}
+                            <img src="{{ url_for('static', filename='uploads/produtos/' + p.foto) }}" 
+                                 alt="{{ p.nome }}"
+                                 class="img-thumbnail"
+                                 style="max-width: 100px;">
                         {% else %}
-                        <img src="{{ url_for('static', filename='images/sem-foto.jpg') }}" 
-                            alt="Sem foto" 
-                            class="img-produto">
-                        {% endif %}
-                            –
+                            Sem foto
                         {% endif %}
                     </td>
                     <td>{{ p.nome }}</td>
