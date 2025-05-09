@@ -1,0 +1,47 @@
+<!-- templates/relatorios/contas_receber.html -->
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <h2>Contas a Receber</h2>
+    <div class="alert alert-info">
+        Total Pendente: <span id="total-pendente"></span>
+    </div>
+    
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Cliente</th>
+                <th>Valor</th>
+                <th>Vencimento</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody id="tabela-dados">
+        </tbody>
+    </table>
+</div>
+
+{% block scripts %}
+<script>
+fetch('/relatorios/financeiro/contas-receber')
+    .then(response => response.json())
+    .then(data => {
+        document.getElementById('total-pendente').textContent = formatCurrency(data.total_pendente);
+        
+        let html = '';
+        data.contas.forEach(item => {
+            html += `
+                <tr class="${item.status === 'Vencido' ? 'table-danger' : ''}">
+                    <td>${item.cliente_nome}</td>
+                    <td>${formatCurrency(item.total)}</td>
+                    <td>${new Date(item.data_vencimento).toLocaleDateString()}</td>
+                    <td>${item.status}</td>
+                </tr>
+            `;
+        });
+        document.getElementById('tabela-dados').innerHTML = html;
+    });
+</script>
+{% endblock %}
+{% endblock %}

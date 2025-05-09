@@ -1,0 +1,158 @@
+<!-- templates/relatorios.html -->
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+    <h1 class="my-4">Dashboard de Relatórios</h1>
+    
+    <!-- Filtros -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="get">
+                <div class="row g-3">
+                    <div class="col-md-3">
+                        <label class="form-label">Top Produtos</label>
+                        <input type="number" name="top_limit" value="{{ params.top_limit }}" class="form-control">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Dias Validade</label>
+                        <input type="number" name="validade_dias" value="{{ params.validade_dias }}" class="form-control">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Top Clientes</label>
+                        <input type="number" name="clientes_limit" value="{{ params.clientes_limit }}" class="form-control">
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Período</label>
+                        <select name="periodo" class="form-select">
+                            <option value="month" {% if params.periodo == 'month' %}selected{% endif %}>Mensal</option>
+                            <option value="year" {% if params.periodo == 'year' %}selected{% endif %}>Anual</option>
+                        </select>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary mt-3">Atualizar</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Seções de Relatórios -->
+    <div class="row">
+        <!-- Top Produtos -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Top Produtos ({{ top_produtos|length }})</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Produto</th>
+                                <th>Qtd Vendida</th>
+                                <th>Total</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for p in top_produtos %}
+                            <tr>
+                                <td>{{ p.nome }}</td>
+                                <td>{{ p.quantidade_vendida }}</td>
+                                <td>{{ p.valor_total|format_currency }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Contas a Receber -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Contas a Receber (Total: {{ total_pendente|format_currency }})</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Cliente</th>
+                                <th>Valor</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for c in contas_receber %}
+                            <tr class="{% if c.status == 'Vencido' %}table-danger{% endif %}">
+                                <td>{{ c.cliente_nome }}</td>
+                                <td>{{ c.total|format_currency }}</td>
+                                <td>{{ c.status }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Estoque -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Estoque Crítico ({{ estoque_nivel|length }})</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Produto</th>
+                                <th>Estoque</th>
+                                <th>Mínimo</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for e in estoque_nivel %}
+                            <tr>
+                                <td>{{ e.nome }}</td>
+                                <td class="text-danger">{{ e.quantidade }}</td>
+                                <td>{{ e.estoque_minimo }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Validade -->
+        <div class="col-md-6 mb-4">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Validade Produtos ({{ estoque_validade|length }})</h5>
+                </div>
+                <div class="card-body">
+                    <table class="table table-sm">
+                        <thead>
+                            <tr>
+                                <th>Produto</th>
+                                <th>Validade</th>
+                                <th>Dias Restantes</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for v in estoque_validade %}
+                            <tr>
+                                <td>{{ v.nome }}</td>
+                                <td>{{ v.data_validade|format_date }}</td>
+                                <td>{{ v.dias_restantes|int }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+{% endblock %}

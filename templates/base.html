@@ -16,7 +16,10 @@
         </div>
         
         <nav class="main-nav">
-            <a href="{{ url_for('dashboard') }}" class="nav-link"><i class="fas fa-home"></i> Dashboard</a>
+            <a href="{{ url_for('index') }}" class="nav-link">
+                <i class="fas fa-home"></i> Home
+            </a>
+            
             <a href="{{ url_for('listar_produtos') }}" class="nav-link"><i class="fas fa-box-open"></i> Produtos</a>
             <a href="{{ url_for('listar_fornecedores') }}" class="nav-link"><i class="fas fa-truck"></i> Fornecedores</a>
             <a href="{{ url_for('logout') }}" class="nav-link btn-danger"><i class="fas fa-sign-out-alt"></i> Sair</a>
@@ -39,10 +42,21 @@
 
     <footer class="main-footer">
         <div class="footer-content">
-            <p class="copyright">&copy; {{ current_year }} Açougue - Todos os direitos reservados</p>
-            <div class="footer-links">
-                <a href="#" class="footer-link">Política de Privacidade</a>
-                <a href="#" class="footer-link">Termos de Uso</a>
+            <div class="footer-nav-links">
+                <a href="{{ url_for('nova_venda') }}" class="footer-link">
+                    <i class="fas fa-cash-register"></i> Nova Venda
+                </a>
+                <a href="{{ url_for('listar_vendas_prazo') }}" class="footer-link">
+                    <i class="fas fa-file-invoice-dollar"></i> Vendas a Prazo
+                </a>
+            </div>
+    
+            <div class="footer-legal">
+                <p class="copyright">&copy; {{ current_year }} Açougue - Todos os direitos reservados</p>
+                <div class="footer-links">
+                    <a href="#" class="footer-link">Política de Privacidade</a>
+                    <a href="#" class="footer-link">Termos de Uso</a>
+                </div>
             </div>
         </div>
     </footer>

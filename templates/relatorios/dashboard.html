@@ -1,0 +1,118 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container dashboard-container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>Relatórios</h1>
+        <a href="{{ url_for('gerar_pdf') }}" class="btn btn-primary">
+            <i class="bi bi-file-pdf me-2"></i>Gerar PDF
+        </a>
+    </div>
+    
+    <div class="row">
+        <!-- Card de Vendas -->
+        <div class="col-md-4 mb-4">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Vendas</h5>
+                    <ul class="list-group">
+                        <a href="{{ url_for('relatorios_unificados', report_type='vendas_periodo') }}" 
+                           class="list-group-item list-group-item-action">
+                            Por Período
+                        </a>
+                        <a href="{{ url_for('relatorios_unificados', report_type='vendas_categorias') }}" 
+                           class="list-group-item list-group-item-action">
+                            Por Categoria
+                        </a>
+                        <a href="{{ url_for('relatorios_unificados', report_type='top_produtos') }}" 
+                           class="list-group-item list-group-item-action">
+                            Top Produtos
+                        </a>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card de Financeiro -->
+        <div class="col-md-4 mb-4">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Financeiro</h5>
+                    <ul class="list-group">
+                        <a href="{{ url_for('relatorios_unificados', report_type='contas_receber') }}" 
+                           class="list-group-item list-group-item-action">
+                            Contas a Receber
+                        </a>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Card de Estoque -->
+        <div class="col-md-4 mb-4">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Estoque</h5>
+                    <ul class="list-group">
+                        <a href="{{ url_for('relatorios_unificados', report_type='estoque_nivel') }}" 
+                           class="list-group-item list-group-item-action">
+                            Nível de Estoque
+                        </a>
+                        <a href="{{ url_for('relatorios_unificados', report_type='estoque_validade') }}" 
+                           class="list-group-item list-group-item-action">
+                            Validade Produtos
+                        </a>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <!-- Outras Seções (Clientes, Fornecedores, etc.) -->
+        <div class="col-md-4 mb-4">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Clientes</h5>
+                    <ul class="list-group">
+                        <a href="{{ url_for('relatorios_unificados', report_type='clientes_fieis') }}" 
+                           class="list-group-item list-group-item-action">
+                            Clientes Fiéis
+                        </a>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4 mb-4">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Fornecedores</h5>
+                    <ul class="list-group">
+                        <a href="{{ url_for('relatorios_unificados', report_type='fornecedores_produtos') }}" 
+                           class="list-group-item list-group-item-action">
+                            Produtos por Fornecedor
+                        </a>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4 mb-4">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">Operacional</h5>
+                    <ul class="list-group">
+                        <a href="{{ url_for('relatorios_unificados', report_type='movimentacao_caixa') }}" 
+                           class="list-group-item list-group-item-action">
+                            Movimentação do Caixa
+                        </a>
+                        <a href="{{ url_for('relatorios_unificados', report_type='comparativo') }}" 
+                           class="list-group-item list-group-item-action">
+                            Comparativo Periódico
+                        </a>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

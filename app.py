@@ -1,3 +1,4 @@
+from gerador_pdf import gerar_relatorio_pdf
 from collections import defaultdict
 from app_logging import registrar_log
 from decorators import login_required, role_required
@@ -24,16 +25,18 @@ logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
 class Config:
-    SECRET_KEY = os.environ.get('SECRET_KEY', 'fallback_key')
+    SECRET_KEY = os.environ.get('SECRET_KEY') 
     UPLOAD_FOLDER = 'static/uploads/produtos'
     DATABASE = 'acougue.db'
 app.config.from_object(Config)
+
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 # Garantir caminho absoluto para upload
 app.config['UPLOAD_FOLDER'] = os.path.abspath(app.config['UPLOAD_FOLDER'])
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
 
 @app.route('/')
 def index():
@@ -98,32 +101,34 @@ def get_fornecedores():
 def listar_produtos():
     search = request.args.get('search', '')
     categoria = request.args.get('categoria', '')
-    
-    query = '''SELECT p.*, f.nome as fornecedor 
-               FROM produtos p 
-               LEFT JOIN fornecedores f ON p.fornecedor_id = f.id 
-               WHERE 1=1'''
+
+    query = '''
+        SELECT p.*, f.nome AS fornecedor
+        FROM produtos AS p
+        LEFT JOIN fornecedores AS f ON p.fornecedor_id = f.id
+        WHERE 1=1
+    '''
     params = []
-    
+
     if search:
         query += " AND (p.nome LIKE ? OR p.codigo_barras = ?)"
         params.extend([f'%{search}%', search])
-    
+
     if categoria:
         query += " AND p.categoria = ?"
         params.append(categoria)
-    
+
     query += " ORDER BY p.nome"
-    
+
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(query, params)
-        produtos = [dict(zip([column[0] for column in cursor.description], row)) 
+        produtos = [dict(zip([column[0] for column in cursor.description], row))
                     for row in cursor.fetchall()]
-    
-    return render_template('produtos/listar.html', 
-                         produtos=produtos,
-                         categorias=get_categorias())
+
+    return render_template('produtos/listar.html',
+                           produtos=produtos,
+                           categorias=get_categorias())
 
 def get_categorias():
     with get_db_connection() as conn:
@@ -140,12 +145,30 @@ def novo_produto():
         saved_filename = None  # Para controle de rollback
 
         try:
+            # Validação de tipo e valor para preço e quantidade
+            preco_raw = request.form['preco']
+            quantidade_raw = request.form['quantidade']
+
+            try:
+                preco = float(preco_raw)
+                if preco <= 0:
+                    raise ValueError("Preço deve ser maior que zero.")
+            except ValueError:
+                raise ValueError("Preço inválido. Deve ser um número positivo.")
+
+            try:
+                quantidade = int(quantidade_raw)
+                if quantidade < 0:
+                    raise ValueError("Quantidade não pode ser negativa.")
+            except ValueError:
+                raise ValueError("Quantidade inválida. Deve ser um número inteiro não-negativo.")
+
             produto_data = {
                 'nome': request.form['nome'],
                 'descricao': request.form.get('descricao', ''),
                 'categoria': request.form['categoria'],
-                'preco': float(request.form['preco']),
-                'quantidade': int(request.form['quantidade']),
+                'preco': preco,
+                'quantidade': quantidade,
                 'estoque_minimo': int(request.form.get('estoque_minimo', 0)),
                 'codigo_barras': request.form.get('codigo_barras'),
                 'fornecedor_id': request.form.get('fornecedor_id'),
@@ -163,7 +186,7 @@ def novo_produto():
 
             with get_db_connection() as conn:
                 cursor = conn.cursor()
-                
+
                 # Validação de campos obrigatórios
                 required_fields = ['nome', 'categoria', 'preco', 'quantidade', 'tipo_venda']
                 for field in required_fields:
@@ -196,7 +219,6 @@ def novo_produto():
             return redirect(url_for('listar_produtos'))
 
         except Exception as e:
-            # Rollback de arquivo em caso de erro
             if saved_filename:
                 try:
                     os.remove(os.path.join(app.config['UPLOAD_FOLDER'], saved_filename))
@@ -205,10 +227,10 @@ def novo_produto():
 
             logging.error(f"Erro ao cadastrar produto: {str(e)}", exc_info=True)
             return render_template('produtos/novo.html',
-                                error=f"Erro ao cadastrar: {str(e)}",
-                                fornecedores=get_fornecedores(),
-                                form_data=request.form)
-    
+                                   error=f"Erro ao cadastrar: {str(e)}",
+                                   fornecedores=get_fornecedores(),
+                                   form_data=request.form)
+
     return render_template('produtos/novo.html', fornecedores=get_fornecedores())
 
 
@@ -464,44 +486,32 @@ def excluir_fornecedor(id):
     except sqlite3.IntegrityError:
         return redirect(url_for('listar_fornecedores', 
                               error='Não é possível excluir fornecedor com produtos vinculados'))
-# ---------------------------------------------------------------
+
+
 # Gestão de Vendas
-# ---------------------------------------------------------------
+
 @app.route('/vendas/nova', methods=['GET', 'POST'])
 @login_required
 def nova_venda():
     if request.method == 'POST':
         try:
+            user_id = session.get('user_id')
+            if not user_id:
+                return jsonify({'success': False, 'error': 'Usuário não autenticado'}), 401
 
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                
-                # Verificar se o usuário existe
-                user_id = session.get('user_id')
-                if not user_id:
-                    return jsonify({'success': False, 'error': 'Usuário não autenticado'}), 401
-                
-                cursor.execute('SELECT id FROM users WHERE id = ?', (user_id,))
-                user = cursor.fetchone()
-                if not user:
-                    return jsonify({'success': False, 'error': 'Usuário inválido'}), 400
-            
-            
             data = request.get_json()
             metodo_pagamento = data['metodo_pagamento']
             data_vencimento = data.get('data_vencimento')
 
-            # Validação server-side
             if metodo_pagamento == 'pagamento_prazo':
                 if not data_vencimento:
                     return jsonify({'success': False, 'error': 'Data de vencimento obrigatória'})
-                
                 vencimento = datetime.strptime(data_vencimento, '%Y-%m-%d').date()
                 if vencimento < datetime.today().date():
                     return jsonify({'success': False, 'error': 'Data de vencimento inválida'})
 
-            cliente_cpf = data.get('cpf') 
-            cliente_nome = data.get('nome_cliente') 
+            cliente_cpf = data.get('cpf')
+            cliente_nome = data.get('nome_cliente')
             status_pagamento = 'pendente' if metodo_pagamento == 'pagamento_prazo' else 'pago'
 
             venda_data = {
@@ -512,68 +522,81 @@ def nova_venda():
                 'status_pagamento': status_pagamento,
                 'data_vencimento': data_vencimento
             }
-            
+
             total = sum(item['preco'] * item['quantidade'] for item in venda_data['itens'])
-            
+            venda_id = f"V{datetime.now().strftime('%Y%m%d%H%M%S')}"
+
             with get_db_connection() as conn:
                 cursor = conn.cursor()
-                
-                venda_id = f"V{datetime.now().strftime('%Y%m%d%H%M%S')}"
-                cursor.execute('''
-                    INSERT INTO vendas
-                    (id, cliente_cpf, cliente_nome, total, metodo_pagamento, 
-                    usuario_id, status_pagamento, data_vencimento)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
-                    venda_id,
-                    venda_data['cliente_cpf'],
-                    venda_data['cliente_nome'],
-                    total,
-                    venda_data['metodo_pagamento'],
-                    user_id,  
-                    venda_data['status_pagamento'],
-                    venda_data['data_vencimento']
-                ))
-                
-                for item in venda_data['itens']:
+                try:
+                    # Verificar se o usuário existe
+                    cursor.execute('SELECT id FROM users WHERE id = ?', (user_id,))
+                    user = cursor.fetchone()
+                    if not user:
+                        return jsonify({'success': False, 'error': 'Usuário inválido'}), 400
+
+                    # Verificar existência dos produtos antes de inserir
+                    for item in venda_data['itens']:
+                        cursor.execute('SELECT id FROM produtos WHERE id = ?', (item['id'],))
+                        produto = cursor.fetchone()
+                        if not produto:
+                            return jsonify({'success': False, 'error': f'Produto ID {item["id"]} não encontrado'}), 400
+
+                    # Início da transação
+                    conn.execute('BEGIN')
+
+                    # Inserir a venda
                     cursor.execute('''
-                        INSERT INTO venda_itens 
-                        (venda_id, produto_id, quantidade, preco_unitario)
-                        VALUES (?, ?, ?, ?)
-                    ''', (venda_id, item['id'], item['quantidade'], item['preco']))
-                    
-                    # Atualiza estoque apenas se for pagamento à vista
-                    if status_pagamento == 'pago' or status_pagamento == 'pagamento_prazo':
+                        INSERT INTO vendas
+                        (id, cliente_cpf, cliente_nome, total, metodo_pagamento,
+                        usuario_id, status_pagamento, data_vencimento)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', (
+                        venda_id,
+                        venda_data['cliente_cpf'],
+                        venda_data['cliente_nome'],
+                        total,
+                        venda_data['metodo_pagamento'],
+                        user_id,
+                        venda_data['status_pagamento'],
+                        venda_data['data_vencimento']
+                    ))
+
+                    # Inserir os itens e atualizar estoque
+                    for item in venda_data['itens']:
                         cursor.execute('''
-                            UPDATE produtos 
+                            INSERT INTO venda_itens
+                            (venda_id, produto_id, quantidade, preco_unitario)
+                            VALUES (?, ?, ?, ?)
+                        ''', (venda_id, item['id'], item['quantidade'], item['preco']))
+
+                        cursor.execute('''
+                            UPDATE produtos
                             SET quantidade = quantidade - ?
                             WHERE id = ?
                         ''', (item['quantidade'], item['id']))
-                
-                        
-                # Verificar existência dos produtos
-                for item in venda_data['itens']:
-                    cursor.execute('SELECT id FROM produtos WHERE id = ?', (item['id'],))
-                    produto = cursor.fetchone()
-                    if not produto:
-                        return jsonify({'success': False, 'error': f'Produto ID {item["id"]} não encontrado'}), 400
-                
-                conn.commit()
-            
-            return jsonify({'success': True, 'venda_id': venda_id})
-        
+
+                    conn.commit()
+                    return jsonify({'success': True, 'venda_id': venda_id})
+
+                except Exception as transac_err:
+                    conn.rollback()
+                    logging.error(f"Erro na transação de venda: {str(transac_err)}")
+                    return jsonify({'success': False, 'error': 'Erro ao registrar venda'}), 500
+
         except Exception as e:
-            logging.error(f"Erro ao registrar venda: {str(e)}")
-            return jsonify({'success': False, 'error': str(e)})
-    
-    else:  # Adicionar tratamento para GET
+            logging.error(f"Erro geral ao processar venda: {str(e)}")
+            return jsonify({'success': False, 'error': str(e)}), 500
+
+    else:
         with get_db_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("SELECT id, nome, preco, quantidade, tipo_venda FROM produtos")
-            produtos = [dict(zip([column[0] for column in cursor.description], row)) 
-                      for row in cursor.fetchall()]
-        
+            produtos = [dict(zip([column[0] for column in cursor.description], row))
+                        for row in cursor.fetchall()]
+
         return render_template('vendas/nova.html', produtos=produtos)
+
     
  
 @app.route('/vendas/pagamento_prazo/pagar/<venda_id>', methods=['POST'])
@@ -595,19 +618,6 @@ def pagar_pagamento_prazo(venda_id):
             if not venda:
                 return redirect(url_for('listar_fiado', error='Venda não encontrada ou já paga'))
             
-            # Baixar estoque após pagamento
-            cursor.execute('''
-                SELECT produto_id, quantidade 
-                FROM venda_itens 
-                WHERE venda_id = ?
-            ''', (venda_id,))
-            
-            for item in cursor.fetchall():
-                cursor.execute('''
-                    UPDATE produtos 
-                    SET quantidade = quantidade - ?
-                    WHERE id = ?
-                ''', (item['quantidade'], item['produto_id']))
             
             conn.commit()
             
@@ -619,7 +629,6 @@ def pagar_pagamento_prazo(venda_id):
 
 # ---------------------------------------------------------------
 # Relatórios
-# ---------------------------------------------------------------
 
 @app.route('/relatorios')
 @login_required
@@ -627,42 +636,144 @@ def pagar_pagamento_prazo(venda_id):
 def relatorios():
     return render_template('relatorios/dashboard.html')
 
-@app.route('/relatorios/vendas')
+
+# Helper functions para relatórios
+def parse_date(date_str, default):
+    try:
+        return datetime.strptime(date_str, '%Y-%m-%d').date().isoformat()
+    except:
+        return default
+
+@app.route('/relatorios/<report_type>')
 @login_required
 @role_required('gerente')
-def relatorio_vendas():
-    start_date = request.args.get('start_date')
-    end_date = request.args.get('end_date')
-    
-    query = '''
-        SELECT v.id, v.data, v.total, v.metodo_pagamento, u.username as operador
-        FROM vendas v
-        JOIN users u ON v.usuario_id = u.id
-        WHERE 1=1
-    '''
-    params = []
-    
-    if start_date:
-        query += " AND v.data >= ?"
-        params.append(start_date)
-    
-    if end_date:
-        query += " AND v.data <= ?"
-        params.append(end_date)
-    
-    query += " ORDER BY v.data DESC"
-    
+def relatorios_unificados(report_type):
+    def parse_date(date_str, default):
+        try:
+            return datetime.strptime(date_str, '%Y-%m-%d').date().isoformat()
+        except:
+            return default
+
+    reports = {
+        'vendas_periodo': {
+            'query': '''
+                SELECT DATE(v.data) as data, COUNT(*) as total_vendas,
+                SUM(v.total) as valor_total, AVG(v.total) as ticket_medio
+                FROM vendas v
+                WHERE DATE(v.data) BETWEEN ? AND ?
+                GROUP BY DATE(v.data) ORDER BY data
+            ''',
+            'params': (
+                request.args.get('start_date', datetime.now().replace(day=1).date().isoformat()),
+                request.args.get('end_date', datetime.now().date().isoformat())
+            )
+        },
+        'vendas_categorias': {
+            'query': '''
+                SELECT p.categoria, SUM(vi.quantidade) as quantidade_vendida,
+                SUM(vi.quantidade * vi.preco_unitario) as valor_total
+                FROM venda_itens vi JOIN produtos p ON vi.produto_id = p.id
+                GROUP BY p.categoria ORDER BY valor_total DESC
+            '''
+        },
+        'top_produtos': {
+            'query': '''
+                SELECT p.nome, SUM(vi.quantidade) as quantidade_vendida,
+                SUM(vi.quantidade * vi.preco_unitario) as valor_total
+                FROM venda_itens vi JOIN produtos p ON vi.produto_id = p.id
+                GROUP BY p.id ORDER BY valor_total DESC LIMIT ?
+            ''',
+            'params': (int(request.args.get('limit', 10)),)
+        },
+        'contas_receber': {
+            'query': '''
+                SELECT cliente_nome, total, data_vencimento,
+                CASE WHEN data_vencimento < DATE('now') THEN 'Vencido' ELSE 'A Vencer' END as status
+                FROM vendas WHERE status_pagamento = 'pendente' ORDER BY data_vencimento
+            ''',
+            'post_process': lambda data: {'contas': data, 'total_pendente': sum(item['total'] for item in data)}
+        },
+        'estoque_nivel': {
+            'query': '''
+                SELECT nome, quantidade, estoque_minimo, (quantidade - estoque_minimo) as diferenca
+                FROM produtos WHERE quantidade < estoque_minimo ORDER BY diferenca ASC
+            '''
+        },
+        'estoque_validade': {
+            'query': '''
+                SELECT nome, data_validade,
+                JULIANDAY(data_validade) - JULIANDAY('now') as dias_restantes
+                FROM produtos WHERE data_validade IS NOT NULL
+                AND dias_restantes BETWEEN 0 AND ? ORDER BY data_validade
+            ''',
+            'params': (int(request.args.get('dias', 30)),)
+        },
+        'clientes_fieis': {
+            'query': '''
+                SELECT cliente_nome, COUNT(*) as total_compras, SUM(total) as valor_total_gasto
+                FROM vendas WHERE cliente_nome IS NOT NULL
+                GROUP BY cliente_nome ORDER BY total_compras DESC LIMIT ?
+            ''',
+            'params': (int(request.args.get('limit', 10)),)
+        },
+        'fornecedores_produtos': {
+            'query': '''
+                SELECT f.nome as fornecedor, COUNT(p.id) as total_produtos, SUM(p.quantidade) as total_estoque
+                FROM fornecedores f LEFT JOIN produtos p ON f.id = p.fornecedor_id
+                GROUP BY f.id ORDER BY total_produtos DESC
+            '''
+        },
+        'movimentacao_caixa': {
+            'query': '''
+                SELECT DATE(data) as data,
+                SUM(CASE WHEN metodo_pagamento = 'fiado' THEN 0 ELSE total END) as entradas,
+                SUM(CASE WHEN metodo_pagamento = 'fiado' THEN total ELSE 0 END) as saidas
+                FROM vendas GROUP BY DATE(data) ORDER BY data DESC
+            '''
+        },
+        'comparativo': {
+            'query': '''
+                SELECT strftime('{group_format}', data) as periodo,
+                COUNT(*) as total_vendas, SUM(total) as valor_total
+                FROM vendas GROUP BY periodo ORDER BY periodo DESC LIMIT 12
+            ''',
+            'params': (),
+            'pre_process': lambda: {'group_format': '%Y-%m' if request.args.get('periodo', 'month') == 'month' else '%Y'}
+        }
+    }
+
+    config = reports.get(report_type)
+    if not config:
+        return jsonify({'error': 'Relatório não encontrado'}), 404
+
     with get_db_connection() as conn:
         cursor = conn.cursor()
+        query = config['query']
+        
+        if 'pre_process' in config:
+            pre_processed = config['pre_process']()
+            query = query.format(**pre_processed)
+        
+        params = config.get('params', ())
         cursor.execute(query, params)
-        vendas = [dict(zip([column[0] for column in cursor.description], row)) 
-                 for row in cursor.fetchall()]
+        
+        dados = [dict(zip([column[0] for column in cursor.description], row)) 
+                for row in cursor.fetchall()]
     
-    return render_template('relatorios/vendas.html', vendas=vendas)
+    if 'post_process' in config:
+        dados = config['post_process'](dados)
+    
+    return jsonify(dados)
 
-# ---------------------------------------------------------------
+
+@app.route('/relatorios/gerar_pdf', endpoint='gerar_pdf')
+@login_required
+@role_required('gerente')
+def relatorio_pdf():
+    return gerar_relatorio_pdf()
+
+
 # Admin (Gerente)
-# ---------------------------------------------------------------
 
 @app.route('/admin/usuarios')
 @login_required
@@ -698,11 +809,9 @@ def admin_estoque():
     
     return render_template('admin/estoque.html', estoque=estoque)
 
-# ---------------------------------------------------------------
-# Dashboard Principal
-# ---------------------------------------------------------------
 
-# Modificações no app.py - Rota /dashboard
+# Dashboard Principal
+
 @app.route('/dashboard')
 @login_required
 def dashboard():
@@ -807,9 +916,8 @@ def dashboard():
        
         return render_template('dashboard_funcionario.html', alertas=alertas_estoque)
     
-# ---------------------------------------------------------------
+
 # Utilitários
-# ---------------------------------------------------------------
 
 @app.context_processor
 def utility_processor():
@@ -960,20 +1068,6 @@ def pagar_venda_prazo(venda_id):
             if cursor.rowcount == 0:
                 return redirect(url_for('listar_vendas_prazo', error='Venda não encontrada ou já paga'))
             
-            # Baixar estoque
-            cursor.execute('''
-                SELECT produto_id, quantidade 
-                FROM venda_itens 
-                WHERE venda_id = ?
-            ''', (venda_id,))
-            
-            for item in cursor.fetchall():
-                cursor.execute('''
-                    UPDATE produtos 
-                    SET quantidade = quantidade - ?
-                    WHERE id = ?
-                ''', (item['quantidade'], item['produto_id']))
-            
             conn.commit()
             
         return redirect(url_for('listar_vendas_prazo', success=True))
@@ -1001,12 +1095,8 @@ def adicionar_observacao_venda_prazo(venda_id):
         return redirect(url_for('listar_vendas_prazo', error_obs='Erro ao salvar observação'))
 
 
-
-# ---------------------------------------------------------------
 # Gestão de Usuários (Admin)
-# ---------------------------------------------------------------
 
-# Adicione esta rota no app.py, na seção de Gestão de Usuários
 @app.route('/admin/usuarios/novo', methods=['GET', 'POST'])
 @login_required
 @role_required('gerente')
@@ -1111,16 +1201,4 @@ def excluir_usuario(id):
 
 
 if __name__ == '__main__':
-    with app.app_context():
-        init_db()
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id FROM users WHERE username = 'admin'")
-            if not cursor.fetchone():
-                hashed_pw = generate_password_hash('admin123')
-                cursor.execute('''
-                    INSERT INTO users (username, email, password_hash, role)
-                    VALUES (?, ?, ?, ?)
-                ''', ('admin', 'admin@example.com', hashed_pw, 'gerente'))
-                conn.commit()
     app.run(debug=True)
