@@ -28,7 +28,7 @@ logging.basicConfig(level=logging.INFO)
 
 app = Flask(__name__)
 class Config:
-    SECRET_KEY = os.environ.get('SECRET_KEY') 
+    SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-key-123'
     UPLOAD_FOLDER = 'static/uploads/produtos'
     DATABASE = 'acougue.db'
 app.config.from_object(Config)
@@ -1281,6 +1281,7 @@ scheduler.add_job(verificar_validades, 'interval', hours=24)
 
 
 if __name__ == '__main__':
+    app.config.from_object(Config)  
     try:
         scheduler.start()
         # Executar verificações imediatamente ao iniciar
