@@ -1,30 +1,76 @@
-import shutil
-from datetime import datetime
-from apscheduler.schedulers.background import BackgroundScheduler
-from gerador_pdf import gerar_relatorio_pdf
-from collections import defaultdict
-from app_logging import registrar_log
-from decorators import login_required, role_required
-import os
 import json
 import logging
+import os
+import shutil
 import sqlite3
-from datetime import datetime
+import zipfile
+from collections import defaultdict
+from datetime import datetime, timedelta
 from functools import wraps
 
+from apscheduler.schedulers.background import BackgroundScheduler
 from flask import (
     Flask, jsonify, render_template, request, redirect, url_for,
     send_from_directory, session, abort
 )
+from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
-from werkzeug.security import generate_password_hash, check_password_hash
 
+from app_logging import registrar_log
 from banco_dados import (
-    init_db, get_db_connection, get_user_by_id, create_user,
-    update_user_role, delete_user, get_all_users
+    fetch_vendas_prazo,
+    marcar_venda_pago,
+    adicionar_observacao_venda,
+    processar_venda,
+    listar_produtos_simples,
+    get_all_users,
+    get_all_produtos,
+    get_all_vendas,
+    get_venda_items,
+    init_db,
+    get_db_connection,
+    get_user_by_id,
+    create_user,
+    update_user_role,
+    delete_user,
+    get_fornecedores,
+    create_fornecedor,
+    get_fornecedor_by_id,
+    update_fornecedor,
+    delete_fornecedor,
+    get_user_by_username,
+    update_user,
+    get_all_fornecedores,
+    listar_produtos as db_listar_produtos,
+    inserir_produto,
+    atualizar_produto,
+    excluir_produto,
+    get_categorias,
+    get_produto_by_id
 )
+from decorators import login_required, role_required
+from gerador_pdf import gerar_relatorio_pdf
 
+from flask_wtf.csrf import CSRFProtect
+
+# Configuração de logging
 logging.basicConfig(level=logging.INFO)
+
+
+def format_datetime(value, format='%d/%m/%Y %H:%M'):
+    if value is None:
+        return ''
+    if isinstance(value, str):
+        # Se for string, converte para datetime primeiro
+        try:
+            value = datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
+        except ValueError:
+            try:
+                value = datetime.strptime(value, '%Y-%m-%d')
+            except ValueError:
+                return value
+    return value.strftime(format)
+
 
 app = Flask(__name__)
 class Config:
@@ -33,13 +79,13 @@ class Config:
     DATABASE = 'acougue.db'
 app.config.from_object(Config)
 
-
-os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+app.jinja_env.filters['format_datetime'] = format_datetime
 
 # Garantir caminho absoluto para upload
 app.config['UPLOAD_FOLDER'] = os.path.abspath(app.config['UPLOAD_FOLDER'])
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
+csrf = CSRFProtect(app)
 
 def backup_db():
     """Rotina de backup do banco de dados"""
@@ -72,6 +118,62 @@ def backup_db():
     except Exception as e:
         logging.error(f"Erro no backup: {str(e)}", exc_info=True)
 
+
+@app.route('/backup')
+@login_required
+@role_required('gerente')
+def download_backup():
+    try:
+        backup_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'backups')
+        os.makedirs(backup_dir, exist_ok=True)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        
+        # Criar backup temporário do banco
+        temp_db_name = f"temp_backup_{timestamp}.db"
+        temp_db_path = os.path.join(backup_dir, temp_db_name)
+        
+        src = sqlite3.connect(app.config['DATABASE'])
+        dst = sqlite3.connect(temp_db_path)
+        with dst:
+            src.backup(dst)
+        src.close()
+        dst.close()
+
+        # Criar arquivo zip
+        backup_name = f"acougue_system_backup_{timestamp}.zip"
+        backup_path = os.path.join(backup_dir, backup_name)
+        
+        with zipfile.ZipFile(backup_path, 'w') as zipf:
+            # Adicionar banco de dados
+            zipf.write(temp_db_path, os.path.basename(temp_db_path))
+            
+            # Adicionar pasta de uploads
+            uploads_path = app.config['UPLOAD_FOLDER']
+            for root, dirs, files in os.walk(uploads_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, start=uploads_path)
+                    zipf.write(file_path, os.path.join('produtos', arcname))
+
+        # Limpeza
+        os.remove(temp_db_path)
+        
+        # Manter apenas últimos 7 backups
+        backups = sorted(
+            [f for f in os.listdir(backup_dir) if f.endswith('.zip')],
+            key=lambda x: os.path.getmtime(os.path.join(backup_dir, x)),
+            reverse=True
+        )
+        while len(backups) > 7:
+            old_backup = backups.pop()
+            os.remove(os.path.join(backup_dir, old_backup))
+            logging.info(f"Removendo backup antigo: {old_backup}")
+
+        return send_from_directory(backup_dir, backup_name, as_attachment=True)
+
+    except Exception as e:
+        logging.error(f"Erro ao gerar backup: {str(e)}", exc_info=True)
+        abort(500, description="Erro ao gerar backup do sistema")
 
 scheduler = BackgroundScheduler(daemon=True)
 scheduler.add_job(backup_db, 'interval', hours=24)
@@ -126,11 +228,6 @@ def logout():
 # Gestão de Produtos
 # ---------------------------------------------------------------
 
-def get_fornecedores():
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, nome FROM fornecedores")
-        return cursor.fetchall()
 
 @app.route('/produtos')
 @login_required
@@ -138,242 +235,70 @@ def get_fornecedores():
 def listar_produtos():
     search = request.args.get('search', '')
     categoria = request.args.get('categoria', '')
-
-    query = '''
-        SELECT p.*, f.nome AS fornecedor
-        FROM produtos AS p
-        LEFT JOIN fornecedores AS f ON p.fornecedor_id = f.id
-        WHERE 1=1
-    '''
-    params = []
-
-    if search:
-        query += " AND (p.nome LIKE ? OR p.codigo_barras = ?)"
-        params.extend([f'%{search}%', search])
-
-    if categoria:
-        query += " AND p.categoria = ?"
-        params.append(categoria)
-
-    query += " ORDER BY p.nome"
-
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(query, params)
-        produtos = [dict(zip([column[0] for column in cursor.description], row))
-                    for row in cursor.fetchall()]
-
+    
+    produtos = db_listar_produtos(search, categoria)
     return render_template('produtos/listar.html',
-                           produtos=produtos,
-                           categorias=get_categorias())
-
-def get_categorias():
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT categoria FROM produtos")
-        return [row[0] for row in cursor.fetchall()]
+                         produtos=produtos,
+                         categorias=get_categorias())
 
 @app.route('/produtos/novo', methods=['GET', 'POST'])
 @login_required
 @role_required('gerente')
 def novo_produto():
     if request.method == 'POST':
-        foto = request.files.get('foto')
-        saved_filename = None  # Para controle de rollback
-
         try:
-            # Validação de tipo e valor para preço e quantidade
-            preco_raw = request.form['preco']
-            quantidade_raw = request.form['quantidade']
-
-            try:
-                preco = float(preco_raw)
-                if preco <= 0:
-                    raise ValueError("Preço deve ser maior que zero.")
-            except ValueError:
-                raise ValueError("Preço inválido. Deve ser um número positivo.")
-
-            try:
-                quantidade = int(quantidade_raw)
-                if quantidade < 0:
-                    raise ValueError("Quantidade não pode ser negativa.")
-            except ValueError:
-                raise ValueError("Quantidade inválida. Deve ser um número inteiro não-negativo.")
-
-            produto_data = {
-                'nome': request.form['nome'],
-                'descricao': request.form.get('descricao', ''),
-                'categoria': request.form['categoria'],
-                'preco': preco,
-                'quantidade': quantidade,
-                'estoque_minimo': int(request.form.get('estoque_minimo', 0)),
-                'codigo_barras': request.form.get('codigo_barras'),
-                'fornecedor_id': request.form.get('fornecedor_id'),
-                'data_validade': request.form.get('data_validade'),
-                'tipo_venda': request.form['tipo_venda']
-            }
-
-            # Processar upload da imagem
-            if foto and foto.filename != '':
-                filename = secure_filename(f"{datetime.now().timestamp()}_{foto.filename}")
-                upload_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                foto.save(upload_path)
-                saved_filename = filename
-                produto_data['foto'] = filename
-
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-
-                # Validação de campos obrigatórios
-                required_fields = ['nome', 'categoria', 'preco', 'quantidade', 'tipo_venda']
-                for field in required_fields:
-                    if not produto_data.get(field):
-                        raise ValueError(f"Campo obrigatório faltando: {field}")
-
-                # Inserir no banco
-                cursor.execute(
-                    """INSERT INTO produtos (
-                        nome, descricao, categoria, preco, quantidade,
-                        estoque_minimo, codigo_barras, fornecedor_id,
-                        data_validade, foto, tipo_venda
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (
-                        produto_data['nome'],
-                        produto_data['descricao'],
-                        produto_data['categoria'],
-                        produto_data['preco'],
-                        produto_data['quantidade'],
-                        produto_data['estoque_minimo'],
-                        produto_data['codigo_barras'],
-                        produto_data['fornecedor_id'],
-                        produto_data['data_validade'],
-                        produto_data.get('foto'),
-                        produto_data['tipo_venda']
-                    )
-                )
-                conn.commit()
-
+            form_data = request.form
+            foto = request.files.get('foto')
+            
+            # Chama a função do banco_dados.py
+            inserir_produto(form_data, foto)
             return redirect(url_for('listar_produtos'))
 
         except Exception as e:
-            if saved_filename:
-                try:
-                    os.remove(os.path.join(app.config['UPLOAD_FOLDER'], saved_filename))
-                except Exception as file_error:
-                    logging.error(f"Erro ao remover arquivo temporário: {file_error}")
-
             logging.error(f"Erro ao cadastrar produto: {str(e)}", exc_info=True)
             return render_template('produtos/novo.html',
-                                   error=f"Erro ao cadastrar: {str(e)}",
-                                   fornecedores=get_fornecedores(),
-                                   form_data=request.form)
+                               error=str(e),
+                               fornecedores=get_fornecedores(),
+                               form_data=request.form)
 
-    return render_template('produtos/novo.html', fornecedores=get_fornecedores())
-
+    return render_template('produtos/novo.html',
+                         fornecedores=get_fornecedores())
 
 @app.route('/produtos/editar/<int:id>', methods=['GET', 'POST'])
 @login_required
 @role_required('gerente')
 def editar_produto(id):
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM produtos WHERE id = ?', (id,))
-        produto = cursor.fetchone()
+    produto = get_produto_by_id(id)
+    if not produto:
+        abort(404)
 
-        if not produto:
-            abort(404)
+    if request.method == 'POST':
+        try:
+            form_data = request.form
+            foto = request.files.get('foto')
+            
+            # Chama a função do banco_dados.py
+            atualizar_produto(id, form_data, foto)
+            return redirect(url_for('listar_produtos'))
 
-        if request.method == 'POST':
-            old_foto = produto['foto']
-            new_filename = None
-            try:
-                update_data = {
-                    'nome': request.form['nome'],
-                    'descricao': request.form.get('descricao', ''),
-                    'categoria': request.form['categoria'],
-                    'preco': float(request.form['preco']),
-                    'quantidade': int(request.form['quantidade']),
-                    'estoque_minimo': int(request.form.get('estoque_minimo', 0)),
-                    'codigo_barras': request.form.get('codigo_barras'),
-                    'fornecedor_id': request.form.get('fornecedor_id') or None,
-                    'data_validade': request.form.get('data_validade') or None,
-                    'tipo_venda': request.form['tipo_venda']
-                }
+        except Exception as e:
+            logging.error(f"Erro ao atualizar produto: {str(e)}")
+            return render_template('produtos/editar.html',
+                                produto=produto,
+                                fornecedores=get_fornecedores(),
+                                error=str(e))
 
-                # Processar nova imagem
-                foto = request.files.get('foto')
-                if foto and foto.filename != '':
-                    # Gerar novo nome e salvar
-                    filename = secure_filename(f"{datetime.now().timestamp()}_{foto.filename}")
-                    upload_path = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-                    foto.save(upload_path)
-                    new_filename = filename
-                    update_data['foto'] = filename
-                else:
-                    update_data['foto'] = old_foto
-
-                # Atualizar banco
-                set_clause = ', '.join([f"{key} = ?" for key in update_data.keys()])
-                values = list(update_data.values()) + [id]
-
-                cursor.execute(f'UPDATE produtos SET {set_clause} WHERE id = ?', values)
-                conn.commit()
-
-                # Remover imagem antiga após commit bem-sucedido
-                if new_filename and old_foto:
-                    try:
-                        old_path = os.path.join(app.config['UPLOAD_FOLDER'], old_foto)
-                        if os.path.exists(old_path):
-                            os.remove(old_path)
-                    except Exception as e:
-                        logging.error(f"Erro ao remover imagem antiga: {str(e)}")
-
-                return redirect(url_for('listar_produtos'))
-
-            except Exception as e:
-                # Rollback de arquivo em caso de erro
-                if new_filename:
-                    try:
-                        os.remove(os.path.join(app.config['UPLOAD_FOLDER'], new_filename))
-                    except Exception as file_error:
-                        logging.error(f"Erro ao remover arquivo temporário: {file_error}")
-
-                logging.error(f"Erro ao atualizar produto: {str(e)}")
-                return render_template('produtos/editar.html',
-                                    produto=produto,
-                                    fornecedores=get_fornecedores(),
-                                    error="Erro ao atualizar produto")
-
-        return render_template('produtos/editar.html',
-                             produto=produto,
-                             fornecedores=get_fornecedores())
-
-# ---------------------------------------------------------------
-# Exclusão de Produtos
-# ---------------------------------------------------------------
+    return render_template('produtos/editar.html',
+                         produto=produto,
+                         fornecedores=get_fornecedores())
 
 @app.route('/produtos/excluir/<int:id>', methods=['POST'])
 @login_required
 @role_required('gerente')
-def excluir_produto(id):
+def excluir_produto_route(id):
     try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            
-            # Busca o produto para excluir a foto
-            cursor.execute('SELECT foto FROM produtos WHERE id = ?', (id,))
-            foto = cursor.fetchone()['foto']
-            
-            # Exclui o produto
-            cursor.execute('DELETE FROM produtos WHERE id = ?', (id,))
-            conn.commit()
-            
-            # Exclui a foto se existir
-            if foto:
-                os.remove(os.path.join(app.config['UPLOAD_FOLDER'], foto))
-                
+        excluir_produto(id)
         return redirect(url_for('listar_produtos'))
-    
     except Exception as e:
         logging.error(f"Erro ao excluir produto: {str(e)}")
         return redirect(url_for('listar_produtos', error="Erro ao excluir produto"))
@@ -387,55 +312,10 @@ def excluir_produto(id):
 @role_required('gerente')
 def listar_fornecedores():
     search = request.args.get('search', '')
-    
-    query = '''SELECT * FROM fornecedores WHERE 1=1'''
-    params = []
-    
-    if search:
-        query += " AND (nome LIKE ? OR cnpj = ?)"
-        params.extend([f'%{search}%', search])
-    
-    query += " ORDER BY nome"
-    
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(query, params)
-        fornecedores = [dict(zip([column[0] for column in cursor.description], row)) 
-                       for row in cursor.fetchall()]
-    
-    return render_template('fornecedores/listar.html', 
-                         fornecedores=fornecedores)
+    # Usa função do banco_dados para buscar fornecedores
+    fornecedores = get_fornecedores(search=search)
+    return render_template('fornecedores/listar.html', fornecedores=fornecedores)
 
-@app.route('/fornecedores/novo', methods=['GET', 'POST'])
-@login_required
-@role_required('gerente')
-def novo_fornecedor():
-    if request.method == 'POST':
-        try:
-            fornecedor_data = {
-                'nome': request.form['nome'],
-                'cnpj': request.form['cnpj'],
-                'contato': request.form['contato'],
-                'endereco': request.form.get('endereco', '')
-            }
-            
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute('''
-                    INSERT INTO fornecedores (nome, cnpj, contato, endereco)
-                    VALUES (?, ?, ?, ?)
-                ''', list(fornecedor_data.values()))
-                conn.commit()
-            
-            return redirect(url_for('listar_fornecedores'))
-        
-        except sqlite3.IntegrityError as e:
-            error = 'CNPJ já cadastrado' if 'UNIQUE' in str(e) else 'Erro ao cadastrar'
-            return render_template('fornecedores/novo.html', 
-                                  error=error,
-                                  form_data=request.form)
-    
-    return render_template('fornecedores/novo.html')
 
 # função de validação de CNPJ
 def validar_cnpj(cnpj):
@@ -463,67 +343,64 @@ def validar_cnpj(cnpj):
     # Verifica se os dígitos calculados coincidem com os informados
     return int(cnpj[12]) == dig1 and int(cnpj[13]) == dig2
 
+@app.route('/fornecedores/novo', methods=['GET', 'POST'])
+@login_required
+@role_required('gerente')
+def novo_fornecedor():
+    if request.method == 'POST':
+        dados = {
+            'nome': request.form['nome'],
+            'cnpj': request.form['cnpj'],
+            'contato': request.form['contato'],
+            'endereco': request.form.get('endereco', '')
+        }
+        try:
+            create_fornecedor(**dados)
+            return redirect(url_for('listar_fornecedores'))
+        except ValueError as e:
+            # Exibe o erro e mantém os dados do formulário
+            return render_template('fornecedores/novo.html', 
+                                error=str(e), 
+                                form_data=request.form)
+    return render_template('fornecedores/novo.html')
+
 
 @app.route('/fornecedores/editar/<int:id>', methods=['GET', 'POST'])
 @login_required
 @role_required('gerente')
 def editar_fornecedor(id):
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM fornecedores WHERE id = ?', (id,))
-        fornecedor = cursor.fetchone()
+    fornecedor = get_fornecedor_by_id(id)
+    if not fornecedor:
+        abort(404)
+    if request.method == 'POST':
+        dados = {
+            'nome': request.form['nome'],
+            'cnpj': request.form['cnpj'],
+            'contato': request.form['contato'],
+            'endereco': request.form.get('endereco', '')
+        }
+        try:
+            update_fornecedor(id, **dados)
+            return redirect(url_for('listar_fornecedores'))
+        except ValueError as e:
+            # Passar form_data para manter dados submetidos
+            return render_template('fornecedores/editar.html', 
+                                fornecedor=fornecedor, 
+                                error=str(e), 
+                                form_data=request.form)  # Adicionado form_data
+    return render_template('fornecedores/editar.html', fornecedor=fornecedor)
 
-        if not fornecedor:
-            abort(404)
-
-        if request.method == 'POST':
-            try:
-                update_data = {
-                    'nome': request.form['nome'],
-                    'cnpj': request.form['cnpj'].replace('.', '').replace('/', '').replace('-', ''),
-                    'contato': request.form['contato'],
-                    'endereco': request.form.get('endereco', '')
-                }
-
-                # Validação do CNPJ
-                if not validar_cnpj(update_data['cnpj']):
-                    return render_template('fornecedores/editar.html',
-                                        fornecedor=fornecedor,
-                                        error='CNPJ inválido')
-
-                cursor.execute('''
-                    UPDATE fornecedores
-                    SET nome = ?, cnpj = ?, contato = ?, endereco = ?
-                    WHERE id = ?
-                ''', list(update_data.values()) + [id])
-                
-                conn.commit()
-                return redirect(url_for('listar_fornecedores'))
-
-            except sqlite3.IntegrityError as e:
-                error = 'CNPJ já cadastrado' if 'UNIQUE' in str(e) else 'Erro ao atualizar'
-                return render_template('fornecedores/editar.html',
-                                    fornecedor=fornecedor,
-                                    error=error)
-
-        return render_template('fornecedores/editar.html',
-                            fornecedor=fornecedor)
 
 @app.route('/fornecedores/excluir/<int:id>', methods=['POST'])
 @login_required
 @role_required('gerente')
 def excluir_fornecedor(id):
     try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('DELETE FROM fornecedores WHERE id = ?', (id,))
-            conn.commit()
+        delete_fornecedor(id)
         return redirect(url_for('listar_fornecedores'))
-    
-    except sqlite3.IntegrityError:
-        return redirect(url_for('listar_fornecedores', 
-                              error='Não é possível excluir fornecedor com produtos vinculados'))
-
+    except Exception:
+        # tratando IntegrityError em delete
+        return redirect(url_for('listar_fornecedores', error='Não é possível excluir fornecedor com produtos vinculados'))
 
 # Gestão de Vendas
 
@@ -531,137 +408,72 @@ def excluir_fornecedor(id):
 @login_required
 def nova_venda():
     if request.method == 'POST':
+        user_id = session.get('user_id')
+        if not user_id:
+            return jsonify({'success': False, 'error': 'Usuário não autenticado'}), 401
+
+        data = request.get_json()
+        metodo_pagamento = data['metodo_pagamento']
+        data_vencimento = data.get('data_vencimento')
+
+        if metodo_pagamento == 'pagamento_prazo':
+            if not data_vencimento:
+                return jsonify({'success': False, 'error': 'Data de vencimento obrigatória'})
+            vencimento = datetime.strptime(data_vencimento, '%Y-%m-%d').date()
+            if vencimento < datetime.today().date():
+                return jsonify({'success': False, 'error': 'Data de vencimento inválida'})
+
+        cliente_cpf = data.get('cpf')
+        cliente_nome = data.get('nome_cliente')
+        status_pagamento = 'pendente' if metodo_pagamento == 'pagamento_prazo' else 'pago'
+
+        venda_data = {
+            'cliente_cpf': data.get('cpf'),
+            'cliente_nome': data.get('nome_cliente'),
+            'metodo_pagamento': data['metodo_pagamento'],
+            'itens': data['itens'],
+            'status_pagamento': 'pendente' if data['metodo_pagamento']=='pagamento_prazo' else 'pago',
+            'data_vencimento': data.get('data_vencimento'),
+            'observacao': data.get('observacao')
+        }
+        venda_id = f"V{datetime.now():%Y%m%d%H%M%S}"
+
         try:
-            user_id = session.get('user_id')
-            if not user_id:
-                return jsonify({'success': False, 'error': 'Usuário não autenticado'}), 401
-
-            data = request.get_json()
-            metodo_pagamento = data['metodo_pagamento']
-            data_vencimento = data.get('data_vencimento')
-
-            if metodo_pagamento == 'pagamento_prazo':
-                if not data_vencimento:
-                    return jsonify({'success': False, 'error': 'Data de vencimento obrigatória'})
-                vencimento = datetime.strptime(data_vencimento, '%Y-%m-%d').date()
-                if vencimento < datetime.today().date():
-                    return jsonify({'success': False, 'error': 'Data de vencimento inválida'})
-
-            cliente_cpf = data.get('cpf')
-            cliente_nome = data.get('nome_cliente')
-            status_pagamento = 'pendente' if metodo_pagamento == 'pagamento_prazo' else 'pago'
-
-            venda_data = {
-                'cliente_cpf': cliente_cpf,
-                'cliente_nome': cliente_nome,
-                'metodo_pagamento': metodo_pagamento,
-                'itens': data['itens'],
-                'status_pagamento': status_pagamento,
-                'data_vencimento': data_vencimento
-            }
-
-            total = sum(item['preco'] * item['quantidade'] for item in venda_data['itens'])
-            venda_id = f"V{datetime.now().strftime('%Y%m%d%H%M%S')}"
-
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                try:
-                    # Verificar se o usuário existe
-                    cursor.execute('SELECT id FROM users WHERE id = ?', (user_id,))
-                    user = cursor.fetchone()
-                    if not user:
-                        return jsonify({'success': False, 'error': 'Usuário inválido'}), 400
-
-                    # Verificar existência dos produtos antes de inserir
-                    for item in venda_data['itens']:
-                        cursor.execute('SELECT id FROM produtos WHERE id = ?', (item['id'],))
-                        produto = cursor.fetchone()
-                        if not produto:
-                            return jsonify({'success': False, 'error': f'Produto ID {item["id"]} não encontrado'}), 400
-
-                    # Início da transação
-                    conn.execute('BEGIN')
-
-                    # Inserir a venda
-                    cursor.execute('''
-                        INSERT INTO vendas
-                        (id, cliente_cpf, cliente_nome, total, metodo_pagamento,
-                        usuario_id, status_pagamento, data_vencimento)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        venda_id,
-                        venda_data['cliente_cpf'],
-                        venda_data['cliente_nome'],
-                        total,
-                        venda_data['metodo_pagamento'],
-                        user_id,
-                        venda_data['status_pagamento'],
-                        venda_data['data_vencimento']
-                    ))
-
-                    # Inserir os itens e atualizar estoque
-                    for item in venda_data['itens']:
-                        cursor.execute('''
-                            INSERT INTO venda_itens
-                            (venda_id, produto_id, quantidade, preco_unitario)
-                            VALUES (?, ?, ?, ?)
-                        ''', (venda_id, item['id'], item['quantidade'], item['preco']))
-
-                        cursor.execute('''
-                            UPDATE produtos
-                            SET quantidade = quantidade - ?
-                            WHERE id = ?
-                        ''', (item['quantidade'], item['id']))
-
-                    conn.commit()
-                    return jsonify({'success': True, 'venda_id': venda_id})
-
-                except Exception as transac_err:
-                    conn.rollback()
-                    logging.error(f"Erro na transação de venda: {str(transac_err)}")
-                    return jsonify({'success': False, 'error': 'Erro ao registrar venda'}), 500
-
+            processar_venda(venda_id, venda_data, user_id)
+            return jsonify({'success': True, 'venda_id': venda_id})
+        except ValueError as ve:
+            return jsonify({'success': False, 'error': str(ve)}), 400
         except Exception as e:
-            logging.error(f"Erro geral ao processar venda: {str(e)}")
-            return jsonify({'success': False, 'error': str(e)}), 500
+            logging.error(f"Erro ao processar venda: {e}")
+            return jsonify({'success': False, 'error': 'Erro ao registrar venda'}), 500
 
-    else:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT id, nome, preco, quantidade, tipo_venda FROM produtos")
-            produtos = [dict(zip([column[0] for column in cursor.description], row))
-                        for row in cursor.fetchall()]
-
-        return render_template('vendas/nova.html', produtos=produtos)
+    # GET: simplesmente listar produtos via função reutilizável
+    produtos = listar_produtos_simples()
+    return render_template('vendas/nova.html', produtos=produtos)
 
     
- 
 @app.route('/vendas/pagamento_prazo/pagar/<venda_id>', methods=['POST'])
 @login_required
 @role_required('gerente')
 def pagar_pagamento_prazo(venda_id):
     try:
         with get_db_connection() as conn:
-            cursor = conn.cursor()
-            
-            cursor.execute('''
+            cursor = conn.execute(
+                """
                 UPDATE vendas
                 SET status_pagamento = 'pago'
-                WHERE id = ? AND metodo_pagamento = 'pagamento_prazo' AND status_pagamento = 'pendente'
-                RETURNING *
-            ''', (venda_id,))
-            
-            venda = cursor.fetchone()
-            if not venda:
+                WHERE id = ? 
+                  AND metodo_pagamento = 'pagamento_prazo' 
+                  AND status_pagamento = 'pendente'
+                """,
+                (venda_id,)
+            )
+            if cursor.rowcount == 0:
                 return redirect(url_for('listar_fiado', error='Venda não encontrada ou já paga'))
-            
-            
             conn.commit()
-            
         return redirect(url_for('listar_fiado', success=True))
-    
     except Exception as e:
-        logging.error(f"Erro ao pagar fiado: {str(e)}")
+        logging.error(f"Erro ao pagar fiado: {e}")
         return redirect(url_for('listar_fiado', error='Erro ao processar pagamento'))
 
 # ---------------------------------------------------------------
@@ -685,12 +497,39 @@ def parse_date(date_str, default):
 @login_required
 @role_required('gerente')
 def relatorios_unificados(report_type):
-    def parse_date(date_str, default):
-        try:
-            return datetime.strptime(date_str, '%Y-%m-%d').date().isoformat()
-        except:
-            return default
+    report_titles = {
+        'vendas_totais': 'Vendas Totais',
+        # Mantemos apenas o título para vendas_totais aqui
+    }
 
+    # Relatório de Vendas Totais (HTML)
+    if report_type == 'vendas_totais':
+        with get_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT 
+                    v.id,
+                    v.data,
+                    v.cliente_nome as cliente,
+                    GROUP_CONCAT(p.nome, ', ') as produtos,
+                    v.total,
+                    v.metodo_pagamento,
+                    COUNT(vi.id) as total_itens
+                FROM vendas v
+                LEFT JOIN venda_itens vi ON v.id = vi.venda_id
+                LEFT JOIN produtos p ON vi.produto_id = p.id
+                GROUP BY v.id
+                ORDER BY v.data DESC
+            ''')
+            dados = [dict(zip([column[0] for column in cursor.description], row)) 
+                    for row in cursor.fetchall()]
+        
+        return render_template('relatorio_unificado.html',
+                            dados=dados,
+                            report_type=report_type,
+                            titulo_relatorio=report_titles.get(report_type, 'Relatório'))
+
+    # Configurações para relatórios JSON
     reports = {
         'vendas_periodo': {
             'query': '''
@@ -781,7 +620,7 @@ def relatorios_unificados(report_type):
 
     config = reports.get(report_type)
     if not config:
-        return jsonify({'error': 'Relatório não encontrado'}), 404
+        abort(404, description="Relatório não encontrado")
 
     with get_db_connection() as conn:
         cursor = conn.cursor()
@@ -800,7 +639,11 @@ def relatorios_unificados(report_type):
     if 'post_process' in config:
         dados = config['post_process'](dados)
     
-    return jsonify(dados)
+    return jsonify({
+        'report_type': report_type,
+        'data': dados,
+        'timestamp': datetime.now().isoformat()
+    })
 
 
 @app.route('/relatorios/gerar_pdf', endpoint='gerar_pdf')
@@ -810,7 +653,9 @@ def relatorio_pdf():
     return gerar_relatorio_pdf()
 
 
+# -----------------------
 # Admin (Gerente)
+# -----------------------
 
 @app.route('/admin/usuarios')
 @login_required
@@ -818,301 +663,26 @@ def relatorio_pdf():
 def admin_usuarios():
     success = request.args.get('success')
     error = request.args.get('error')
-    
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT id, username, email, role FROM users")
-        usuarios = [dict(zip([column[0] for column in cursor.description], row)) 
-                   for row in cursor.fetchall()]
-    
-    return render_template('admin/usuarios.html', 
-                         usuarios=usuarios,
-                         success=success,
-                         error=error)
+    # Usa a função do módulo banco_dados
+    usuarios = [dict(u) for u in get_all_users()]
+    return render_template(
+        'admin/usuarios.html',
+        usuarios=usuarios,
+        success=success,
+        error=error
+    )
 
 @app.route('/admin/estoque')
 @login_required
 @role_required('gerente')
 def admin_estoque():
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
-            SELECT nome, quantidade, estoque_minimo 
-            FROM produtos 
-            ORDER BY quantidade ASC
-        ''')
-        estoque = [dict(zip([column[0] for column in cursor.description], row)) 
-                  for row in cursor.fetchall()]
-    
+    # Obtém todos os produtos e filtra alerta de estoque
+    produtos = get_all_produtos()
+    estoque = [
+        p for p in produtos
+        if p['quantidade'] < p['estoque_minimo']
+    ]
     return render_template('admin/estoque.html', estoque=estoque)
-
-
-# Dashboard Principal
-
-@app.route('/dashboard')
-@login_required
-def dashboard():
-    if session['role'] == 'gerente':
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-
-            # Métricas Principais
-            cursor.execute("SELECT COUNT(*) as total FROM vendas")
-            total_vendas = cursor.fetchone()['total']
-
-            cursor.execute("SELECT SUM(total) as total_hoje FROM vendas WHERE DATE(data) = DATE('now')")
-            total_hoje = cursor.fetchone()['total_hoje'] or 0
-
-            cursor.execute("SELECT COUNT(*) as hoje FROM vendas WHERE DATE(data) = DATE('now')")
-            vendas_hoje = cursor.fetchone()['hoje']
-
-            cursor.execute("SELECT COUNT(*) as falta FROM produtos WHERE quantidade < estoque_minimo")
-            total_produtos_falta = cursor.fetchone()['falta']
-
-            # Métricas Financeiras
-            cursor.execute("""
-                SELECT 
-                    COALESCE(SUM(total), 0) as receita_mensal,
-                    COALESCE(AVG(total), 0) as media_ticket
-                FROM vendas 
-                WHERE strftime('%Y-%m', data) = strftime('%Y-%m', 'now')
-            """)
-            financeiro = cursor.fetchone()
-            receita_mensal = financeiro['receita_mensal']
-            media_ticket = financeiro['media_ticket']
-
-            # Métricas de Pagamento
-            cursor.execute("""
-                SELECT metodo_pagamento, COUNT(*) as total, SUM(total) as valor_total
-                FROM vendas
-                GROUP BY metodo_pagamento
-            """)
-            sales_por_metodo = [dict(row) for row in cursor.fetchall()]
-
-            # Tendência de Vendas
-            cursor.execute("""
-                SELECT 
-                    DATE(data) as data,
-                    COUNT(*) as quantidade_vendas,
-                    SUM(total) as total_vendas
-                FROM vendas
-                WHERE data >= DATE('now', '-7 days')
-                GROUP BY DATE(data)
-                ORDER BY data ASC
-            """)
-            vendas_semana = [dict(row) for row in cursor.fetchall()]
-
-            # Dados de Estoque
-            cursor.execute('''
-                SELECT nome, quantidade, estoque_minimo, preco
-                FROM produtos
-                WHERE quantidade < estoque_minimo
-                ORDER BY quantidade ASC
-            ''')
-            alertas_estoque = [dict(row) for row in cursor.fetchall()]
-
-            valor_estoque = sum(item['quantidade'] * item['preco'] for item in alertas_estoque)
-
-            # Performance de Produtos
-            cursor.execute('''
-                SELECT 
-                    p.nome,
-                    SUM(vi.quantidade) as quantidade_vendida,
-                    SUM(vi.quantidade * vi.preco_unitario) as receita_total
-                FROM venda_itens vi
-                JOIN produtos p ON vi.produto_id = p.id
-                GROUP BY vi.produto_id
-                ORDER BY quantidade_vendida DESC
-                LIMIT 5
-            ''')
-            ranking_produtos = [dict(row) for row in cursor.fetchall()]
-
-        return render_template('dashboard_gerente.html',
-                             total_vendas=total_vendas,
-                             vendas_hoje=vendas_hoje,
-                             total_produtos_falta=total_produtos_falta,
-                             receita_mensal=receita_mensal,
-                             media_ticket=media_ticket,
-                             total_hoje=total_hoje,
-                             sales_por_metodo=sales_por_metodo,
-                             vendas_semana=vendas_semana,
-                             alertas_estoque=alertas_estoque,
-                             valor_estoque=valor_estoque,
-                             ranking_produtos=ranking_produtos)
-    else:
-        # Dashboard para funcionários
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT nome, quantidade, estoque_minimo
-                FROM produtos
-                WHERE quantidade < estoque_minimo
-                ORDER BY quantidade ASC
-            ''')
-            alertas_estoque = cursor.fetchall()
-       
-        return render_template('dashboard_funcionario.html', alertas=alertas_estoque)
-    
-
-
-@app.route('/vendas/listar_vendas_prazo')
-@login_required
-@role_required('gerente')
-def listar_vendas_prazo():
-    letra_filter = request.args.get('letra', '').upper()
-    cliente_filter = request.args.get('cliente_filter')  # Novo filtro
-    
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        
-        # Obter lista de clientes distintos
-        cursor.execute("""
-            SELECT DISTINCT cliente_nome 
-            FROM vendas 
-            WHERE metodo_pagamento = 'pagamento_prazo' 
-            ORDER BY cliente_nome
-        """)
-        clientes = [row['cliente_nome'] for row in cursor.fetchall()]
-        
-        # Consulta principal
-        base_query = '''
-            SELECT
-                v.id,
-                v.cliente_nome,
-                v.data,
-                v.total,
-                v.status_pagamento,
-                v.data_vencimento,
-                v.observacao,
-                p.nome as produto_nome,
-                vi.quantidade,
-                vi.preco_unitario
-            FROM vendas v
-            LEFT JOIN venda_itens vi ON v.id = vi.venda_id
-            LEFT JOIN produtos p ON vi.produto_id = p.id
-            WHERE v.metodo_pagamento = 'pagamento_prazo'
-        '''
-        
-        params = []
-        # Aplicar filtro de cliente primeiro
-        if cliente_filter:
-            base_query += " AND v.cliente_nome = ?"
-            params.append(cliente_filter)
-        elif letra_filter and len(letra_filter) == 1:
-            base_query += " AND v.cliente_nome LIKE ?"
-            params.append(f"{letra_filter}%")
-        
-        # Ordenação mantida
-        base_query += '''
-            ORDER BY 
-                CASE WHEN v.status_pagamento = 'pendente' THEN 0 ELSE 1 END,
-                v.data_vencimento ASC,
-                v.cliente_nome ASC
-        '''
-        
-        cursor.execute(base_query, params)
-        rows = cursor.fetchall()
-    
-    vendas_dict = defaultdict(lambda: {
-        'id': None,
-        'cliente_nome': '',
-        'data': None,
-        'total': 0,
-        'status_pagamento': '',
-        'data_vencimento': None,
-        'observacao': '',
-        'vencida': False,
-        'itens': []
-    })
-    
-    hoje = datetime.now().date()
-    
-    for row in rows:
-        venda_id = row['id']
-        data = datetime.strptime(row['data'], '%Y-%m-%d %H:%M:%S') if row['data'] else None
-        data_vencimento = datetime.strptime(row['data_vencimento'], '%Y-%m-%d').date() if row['data_vencimento'] else None
-        
-        vencida = (
-            row['status_pagamento'] == 'pendente' and 
-            data_vencimento and 
-            data_vencimento < hoje
-        )
-        
-        vendas_dict[venda_id].update({
-            'id': venda_id,
-            'cliente_nome': row['cliente_nome'],
-            'data': data,
-            'total': row['total'],
-            'status_pagamento': row['status_pagamento'],
-            'data_vencimento': data_vencimento,
-            'observacao': row['observacao'],
-            'vencida': vencida
-        })
-        
-        if row['produto_nome']:
-            vendas_dict[venda_id]['itens'].append({
-                'nome': row['produto_nome'],
-                'quantidade': row['quantidade'],
-                'preco_unitario': row['preco_unitario']
-            })
-    
-    vendas = list(vendas_dict.values())
-    
-    total_vendas = len(vendas)
-    total_pendentes = sum(1 for v in vendas if v['status_pagamento'] == 'pendente')
-    total_valor_pendente = sum(v['total'] for v in vendas if v['status_pagamento'] == 'pendente')
-    
-    return render_template(
-        'vendas/listar_vendas_prazo.html',
-        vendas=vendas,
-        total_vendas=total_vendas,
-        total_pendentes=total_pendentes,
-        total_valor_pendente=total_valor_pendente,
-        clientes=clientes
-    )
-
-
-@app.route('/vendas/listar_vendas_prazo/pagar/<venda_id>', methods=['POST'])
-@login_required
-@role_required('gerente')
-def pagar_venda_prazo(venda_id):
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                UPDATE vendas
-                SET status_pagamento = 'pago'
-                WHERE id = ? AND metodo_pagamento = 'pagamento_prazo' AND status_pagamento = 'pendente'
-            ''', (venda_id,))
-            
-            if cursor.rowcount == 0:
-                return redirect(url_for('listar_vendas_prazo', error='Venda não encontrada ou já paga'))
-            
-            conn.commit()
-            
-        return redirect(url_for('listar_vendas_prazo', success=True))
-    except Exception as e:
-        logging.error(f"Erro ao pagar venda a prazo: {str(e)}")
-        return redirect(url_for('listar_vendas_prazo', error='Erro ao processar pagamento'))
-
-@app.route('/vendas/listar_vendas_prazo/adicionar_observacao/<venda_id>', methods=['POST'])
-@login_required
-@role_required('gerente')
-def adicionar_observacao_venda_prazo(venda_id):
-    observacao = request.form.get('observacao', '')
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                UPDATE vendas
-                SET observacao = ?
-                WHERE id = ?
-            ''', (observacao, venda_id))
-            conn.commit()
-        return redirect(url_for('listar_vendas_prazo', success_obs=True))
-    except Exception as e:
-        logging.error(f"Erro ao adicionar observação: {str(e)}")
-        return redirect(url_for('listar_vendas_prazo', error_obs='Erro ao salvar observação'))
 
 
 # Gestão de Usuários (Admin)
@@ -1122,26 +692,22 @@ def adicionar_observacao_venda_prazo(venda_id):
 @role_required('gerente')
 def novo_usuario():
     if request.method == 'POST':
+        username = request.form.get('username', '').strip()
+        email = request.form.get('email', '').strip()
+        password = request.form.get('password', '')
+        role = request.form.get('role', 'funcionario')
+
+        # Validações básicas
+        if not all([username, email, password]):
+            return render_template('admin/novo_usuario.html',
+                                   error='Todos os campos são obrigatórios',
+                                   form_data=request.form)
+        if role not in ['gerente', 'funcionario']:
+            return render_template('admin/novo_usuario.html',
+                                   error='Cargo inválido',
+                                   form_data=request.form)
         try:
-            username = request.form['username']
-            email = request.form['email']
-            password = request.form['password']
-            role = request.form['role']
-            
-            # Validações básicas
-            if not all([username, email, password]):
-                return render_template('admin/novo_usuario.html', 
-                                     error='Todos os campos são obrigatórios',
-                                     form_data=request.form)
-            
-            if role not in ['gerente', 'funcionario']:
-                return render_template('admin/novo_usuario.html',
-                                     error='Cargo inválido',
-                                     form_data=request.form)
-            
-            # Criar o usuário
             user_id = create_user(username, email, password, role)
-            
             registrar_log(
                 session['user_id'],
                 'create_user',
@@ -1149,21 +715,16 @@ def novo_usuario():
                 {'user_id': user_id, 'username': username, 'role': role},
                 request=request
             )
-            
             return redirect(url_for('admin_usuarios', success=f'Usuário {username} criado com sucesso'))
-        
-        except sqlite3.IntegrityError as e:
-            error = 'Username ou email já existente' if 'UNIQUE' in str(e) else 'Erro ao criar usuário'
+        except ValueError as ve:
             return render_template('admin/novo_usuario.html',
-                                error=error,
-                                form_data=request.form)
-        
+                                   error=str(ve),
+                                   form_data=request.form)
         except Exception as e:
-            logging.error(f"Erro ao criar usuário: {str(e)}")
+            logging.error(f"Erro ao criar usuário: {e}")
             return render_template('admin/novo_usuario.html',
-                                error='Erro ao criar usuário',
-                                form_data=request.form)
-    
+                                   error='Erro ao criar usuário',
+                                   form_data=request.form)
     return render_template('admin/novo_usuario.html')
 
 
@@ -1221,14 +782,117 @@ def excluir_usuario(id):
 
 
 
-# Utilitários
 
-@app.context_processor
-def utility_processor():
-    return {
-        'format_currency': lambda value: f"R$ {value:,.2f}".replace(',', '_').replace('.', ',').replace('_', '.'),
-        'now': datetime.now
-    }
+# Dashboard Principal
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        is_gerente = session['role'] == 'gerente'
+        data = {'is_gerente': is_gerente}
+
+        # Dados básicos para todos os usuários
+        cursor.execute('''
+            SELECT 
+                v.id, v.data, v.cliente_nome as cliente, v.total,
+                v.metodo_pagamento, v.status_pagamento
+            FROM vendas v
+            WHERE DATE(v.data) = DATE('now')
+            ORDER BY v.data DESC
+        ''')
+        data['vendas_hoje'] = [dict(zip([column[0] for column in cursor.description], row)) 
+                       for row in cursor.fetchall()]
+
+        
+        cursor.execute('SELECT SUM(total) as total FROM vendas WHERE DATE(data) = DATE("now")')
+        data['total_dia'] = cursor.fetchone()['total'] or 0
+
+        cursor.execute('''
+            SELECT nome, quantidade, estoque_minimo
+            FROM produtos
+            WHERE quantidade < estoque_minimo
+            ORDER BY quantidade ASC
+        ''')
+        data['alertas_estoque'] = cursor.fetchall()
+
+        if is_gerente:
+            # Métricas adicionais para gerentes
+            cursor.execute("SELECT COUNT(*) as total FROM vendas")
+            data['total_vendas'] = cursor.fetchone()['total']
+
+            cursor.execute('''
+                SELECT 
+                    COUNT(*) as total_vendas_hoje,
+                    SUM(total) as total_receita_hoje,
+                    AVG(total) as ticket_medio_hoje
+                FROM vendas 
+                WHERE DATE(data) = DATE('now')
+            ''')
+            data.update(cursor.fetchone())
+
+            cursor.execute('''
+                SELECT metodo_pagamento, COUNT(*) as quantidade,
+                       SUM(total) as valor_total
+                FROM vendas
+                WHERE DATE(data) = DATE('now')
+                GROUP BY metodo_pagamento
+            ''')
+            data['metodos_pagamento'] = cursor.fetchall()
+
+            cursor.execute('''
+                SELECT p.nome, SUM(vi.quantidade) as quantidade_vendida
+                FROM venda_itens vi
+                JOIN produtos p ON vi.produto_id = p.id
+                GROUP BY vi.produto_id
+                ORDER BY quantidade_vendida DESC
+                LIMIT 5
+            ''')
+            data['top_produtos'] = cursor.fetchall()
+
+        return render_template('dashboard.html', **data)
+    
+
+
+@app.route('/vendas/listar_vendas_prazo')
+@login_required
+@role_required('gerente')
+def listar_vendas_prazo():
+    letra_filter = request.args.get('letra', '').upper()
+    cliente_filter = request.args.get('cliente_filter')
+
+    vendas, clientes, total_vendas, total_pendentes, total_valor_pendente = \
+        fetch_vendas_prazo(cliente_filter, letra_filter)
+
+    return render_template(
+        'vendas/listar_vendas_prazo.html',
+        vendas=vendas,
+        total_vendas=total_vendas,
+        total_pendentes=total_pendentes,
+        total_valor_pendente=total_valor_pendente,
+        clientes=clientes
+    )
+
+@app.route('/vendas/listar_vendas_prazo/pagar/<venda_id>', methods=['POST'])
+@login_required
+@role_required('gerente')
+def pagar_venda_prazo(venda_id):
+    sucesso = marcar_venda_pago(venda_id)
+    if not sucesso:
+        return redirect(url_for('listar_vendas_prazo', error='Venda não encontrada ou já paga'))
+    return redirect(url_for('listar_vendas_prazo', success=True))
+
+@app.route('/vendas/listar_vendas_prazo/adicionar_observacao/<venda_id>', methods=['POST'])
+@login_required
+@role_required('gerente')
+def adicionar_observacao_venda_prazo(venda_id):
+    observacao = request.form.get('observacao', '')
+    adicionar_observacao_venda(venda_id, observacao)
+    return redirect(url_for('listar_vendas_prazo', success_obs=True))
+
+
+# Utilitários
 
 
 @app.template_filter('format_currency')
@@ -1238,8 +902,7 @@ def format_currency(value):
     except (ValueError, TypeError):
         return "R$ 0,00"
 
-# Adicione no app.py
-from datetime import timedelta
+app.jinja_env.filters['format_currency'] = format_currency
 
 def verificar_validades():
     """Verifica produtos próximos do vencimento"""
@@ -1262,9 +925,9 @@ def verificar_validades():
             for produto in produtos:
                 registrar_log(
                     user_id='Sistema',
-                    acao='alerta_validade',
-                    nivel='WARNING',
-                    detalhes={
+                    action='alerta_validade',  
+                    level='WARNING',           
+                    details={                  
                         'produto_id': produto['id'],
                         'nome': produto['nome'],
                         'data_validade': produto['data_validade'],
@@ -1281,10 +944,8 @@ scheduler.add_job(verificar_validades, 'interval', hours=24)
 
 
 if __name__ == '__main__':
-    app.config.from_object(Config)  
     try:
         scheduler.start()
-        # Executar verificações imediatamente ao iniciar
         backup_db()
         verificar_validades()
         app.run(debug=True)

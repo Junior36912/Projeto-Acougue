@@ -1,0 +1,14 @@
+{% extends 'base.html' %}
+
+{% block title %}Erro Interno do Servidor - 500{% endblock %}
+
+{% block content %}
+<div class="form-container" style="text-align: center;">
+    <h2 style="color: var(--primary-color); font-size: 2rem;">Erro 500</h2>
+    <p style="margin: 1rem 0;">Ocorreu um erro interno no servidor. Estamos trabalhando para corrigir isso.</p>
+    <i class="fas fa-server" style="font-size: 4rem; color: var(--primary-color); margin-bottom: 1rem;"></i>
+    <div>
+        <a href="{{ url_for('index') }}" class="btn btn-primary">Voltar para a Página Inicial</a>
+    </div>
+</div>
+{% endblock %}

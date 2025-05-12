@@ -53,7 +53,7 @@
                     <td>{{ p.fornecedor or '–' }}</td>
                     <td style="display: flex; gap: 0.5rem;">
                         <a href="{{ url_for('editar_produto', id=p.id) }}" class="btn btn-primary">Editar</a>
-                        <form method="POST" action="{{ url_for('excluir_produto', id=p.id) }}" onsubmit="return confirm('Tem certeza que deseja excluir este produto?');">
+                        <form method="POST" action="{{ url_for('excluir_produto_route', id=p.id) }}" onsubmit="return confirm('Tem certeza que deseja excluir este produto?');">
                             <button type="submit" class="btn btn-danger">Excluir</button>
                         </form>
                     </td>

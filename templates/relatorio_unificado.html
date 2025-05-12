@@ -1,0 +1,345 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container dashboard-container">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h1>{{ titulo_relatorio }}</h1>
+        <div>
+            <a href="{{ url_for('gerar_pdf') }}" class="btn btn-primary me-2">
+                <i class="bi bi-file-pdf me-2"></i>Gerar PDF
+            </a>
+            <a href="{{ url_for('relatorios') }}" class="btn btn-secondary">
+                <i class="bi bi-arrow-left me-2"></i>Voltar
+            </a>
+        </div>
+    </div>
+
+    <!-- Filtros para relatórios que precisam -->
+    {% if report_type in ['vendas_periodo', 'estoque_validade', 'top_produtos', 'clientes_fieis', 'comparativo'] %}
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">Filtros</h5>
+            <form method="get" class="row g-3">
+                {% if report_type == 'vendas_periodo' %}
+                <div class="col-md-4">
+                    <label for="start_date" class="form-label">Data Inicial</label>
+                    <input type="date" class="form-control" id="start_date" name="start_date" 
+                           value="{{ request.args.get('start_date', '') }}">
+                </div>
+                <div class="col-md-4">
+                    <label for="end_date" class="form-label">Data Final</label>
+                    <input type="date" class="form-control" id="end_date" name="end_date" 
+                           value="{{ request.args.get('end_date', '') }}">
+                </div>
+                {% elif report_type == 'estoque_validade' %}
+                <div class="col-md-4">
+                    <label for="dias" class="form-label">Dias para vencer</label>
+                    <input type="number" class="form-control" id="dias" name="dias" 
+                           value="{{ request.args.get('dias', '30') }}">
+                </div>
+                {% elif report_type in ['top_produtos', 'clientes_fieis'] %}
+                <div class="col-md-4">
+                    <label for="limit" class="form-label">Quantidade de itens</label>
+                    <input type="number" class="form-control" id="limit" name="limit" 
+                           value="{{ request.args.get('limit', '10') }}">
+                </div>
+                {% elif report_type == 'comparativo' %}
+                <div class="col-md-4">
+                    <label for="periodo" class="form-label">Agrupar por</label>
+                    <select class="form-select" id="periodo" name="periodo">
+                        <option value="month" {% if request.args.get('periodo', 'month') == 'month' %}selected{% endif %}>Mês</option>
+                        <option value="year" {% if request.args.get('periodo') == 'year' %}selected{% endif %}>Ano</option>
+                    </select>
+                </div>
+                {% endif %}
+                <div class="col-md-4 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary">Aplicar Filtros</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Seção de métricas resumidas -->
+    {% if dados and report_type in ['vendas_periodo', 'contas_receber'] %}
+    <div class="row mb-4">
+        {% if report_type == 'vendas_periodo' %}
+        <div class="col-md-4">
+            <div class="card text-white bg-primary">
+                <div class="card-body">
+                    <h5 class="card-title">Total de Vendas</h5>
+                    <p class="card-text display-6">{{ dados|sum(attribute='total_vendas') }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card text-white bg-success">
+                <div class="card-body">
+                    <h5 class="card-title">Valor Total</h5>
+                    <p class="card-text display-6">{{ dados|sum(attribute='valor_total')|format_currency }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <div class="card text-white bg-info">
+                <div class="card-body">
+                    <h5 class="card-title">Ticket Médio</h5>
+                    <p class="card-text display-6">
+                        {% if dados|length > 0 %}
+                            {{ (dados|sum(attribute='valor_total') / dados|sum(attribute='total_vendas'))|round(2)|format_currency }}
+                        {% else %}
+                            R$ 0,00
+                        {% endif %}
+                    </p>
+                </div>
+            </div>
+        </div>
+        {% elif report_type == 'contas_receber' %}
+        <div class="col-md-6">
+            <div class="card text-white bg-warning">
+                <div class="card-body">
+                    <h5 class="card-title">Total Pendente</h5>
+                    <p class="card-text display-6">{{ dados.total_pendente|format_currency }}</p>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card text-white bg-danger">
+                <div class="card-body">
+                    <h5 class="card-title">Contas Pendentes</h5>
+                    <p class="card-text display-6">{{ dados.contas|length }}</p>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Seção principal do relatório -->
+    <div class="card">
+        <div class="card-body">
+            {% if report_type == 'vendas_totais' %}
+                <!-- Tabela de Vendas Totais -->
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                <th>Data</th>
+                                <th>Cliente</th>
+                                <th>Produtos</th>
+                                <th>Total</th>
+                                <th>Pagamento</th>
+                                <th>Itens</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for venda in dados %}
+                            <tr>
+                                <td>{{ venda.data|format_datetime('%d/%m/%Y %H:%M') }}</td>
+                                <td>{{ venda.cliente or 'Consumidor' }}</td>
+                                <td>{{ venda.produtos }}</td>
+                                <td>{{ venda.total|format_currency }}</td>
+                                <td>
+                                    <span class="badge bg-{{ 'success' if venda.metodo_pagamento != 'pagamento_prazo' else 'warning' }}">
+                                        {{ venda.metodo_pagamento|replace('_', ' ')|title }}
+                                    </span>
+                                </td>
+                                <td>{{ venda.total_itens }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% elif dados %}
+                <!-- Outros tipos de relatório -->
+                <div class="table-responsive">
+                    <table class="table table-striped table-hover">
+                        <thead class="table-dark">
+                            <tr>
+                                {% for coluna in dados[0].keys() %}
+                                <th>{{ coluna|replace('_', ' ')|title }}</th>
+                                {% endfor %}
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for linha in dados %}
+                            <tr>
+                                {% for coluna, valor in linha.items() %}
+                                <td>
+                                    {% if valor is number %}
+                                        {% if 'total' in coluna.lower() or 'valor' in coluna.lower() or 'preco' in coluna.lower() %}
+                                            {{ valor|format_currency }}
+                                        {% else %}
+                                            {{ valor }}
+                                        {% endif %}
+                                    {% else %}
+                                        {{ valor or '-' }}
+                                    {% endif %}
+                                </td>
+                                {% endfor %}
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% else %}
+                <div class="alert alert-info">
+                    Nenhum dado encontrado para o período selecionado.
+                </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Gráficos para alguns relatórios -->
+    {% if dados and report_type in ['vendas_periodo', 'vendas_categorias', 'top_produtos'] %}
+    <div class="card mt-4">
+        <div class="card-body">
+            <h5 class="card-title">Visualização Gráfica</h5>
+            <div id="chart-container" style="height: 400px;"></div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+{% if dados and report_type in ['vendas_periodo', 'vendas_categorias', 'top_produtos'] %}
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const chart = echarts.init(document.getElementById('chart-container'));
+        
+        {% if report_type == 'vendas_periodo' %}
+        const option = {
+            tooltip: {
+                trigger: 'axis',
+                formatter: '{b}<br/>Vendas: {c0}<br/>Total: {c1}'
+            },
+            legend: {
+                data: ['Total de Vendas', 'Valor Total']
+            },
+            xAxis: {
+                type: 'category',
+                data: {{ dados|map(attribute='data')|list|tojson }}
+            },
+            yAxis: [
+                {
+                    type: 'value',
+                    name: 'Vendas',
+                    position: 'left'
+                },
+                {
+                    type: 'value',
+                    name: 'Valor (R$)',
+                    position: 'right'
+                }
+            ],
+            series: [
+                {
+                    name: 'Total de Vendas',
+                    type: 'bar',
+                    data: {{ dados|map(attribute='total_vendas')|list|tojson }}
+                },
+                {
+                    name: 'Valor Total',
+                    type: 'line',
+                    yAxisIndex: 1,
+                    data: {{ dados|map(attribute='valor_total')|list|tojson }}
+                }
+            ]
+        };
+        {% elif report_type == 'vendas_categorias' %}
+        // Substituímos o lambda por uma abordagem alternativa
+        const chartData = [
+            {% for item in dados %}
+            {
+                value: {{ item.valor_total }},
+                name: '{{ item.categoria }}'
+            }{% if not loop.last %},{% endif %}
+            {% endfor %}
+        ];
+        
+        const option = {
+            tooltip: {
+                trigger: 'item',
+                formatter: '{a} <br/>{b}: {c} ({d}%)'
+            },
+            legend: {
+                orient: 'vertical',
+                left: 10,
+                data: {{ dados|map(attribute='categoria')|list|tojson }}
+            },
+            series: [
+                {
+                    name: 'Vendas por Categoria',
+                    type: 'pie',
+                    radius: ['50%', '70%'],
+                    avoidLabelOverlap: false,
+                    label: {
+                        show: false,
+                        position: 'center'
+                    },
+                    emphasis: {
+                        label: {
+                            show: true,
+                            fontSize: '18',
+                            fontWeight: 'bold'
+                        }
+                    },
+                    labelLine: {
+                        show: false
+                    },
+                    data: chartData
+                }
+            ]
+        };
+        {% elif report_type == 'top_produtos' %}
+        const option = {
+            tooltip: {
+                trigger: 'axis',
+                axisPointer: {
+                    type: 'shadow'
+                }
+            },
+            grid: {
+                left: '3%',
+                right: '4%',
+                bottom: '3%',
+                containLabel: true
+            },
+            xAxis: {
+                type: 'value',
+                name: 'Valor Total (R$)'
+            },
+            yAxis: {
+                type: 'category',
+                data: {{ dados|map(attribute='nome')|list|tojson }},
+                axisLabel: {
+                    interval: 0,
+                    rotate: 30
+                }
+            },
+            series: [
+                {
+                    name: 'Valor Total',
+                    type: 'bar',
+                    data: {{ dados|map(attribute='valor_total')|list|tojson }},
+                    itemStyle: {
+                        color: function(params) {
+                            const colorList = ['#c23531','#2f4554','#61a0a8','#d48265','#91c7ae'];
+                            return colorList[params.dataIndex % colorList.length];
+                        }
+                    }
+                }
+            ]
+        };
+        {% endif %}
+        
+        chart.setOption(option);
+        window.addEventListener('resize', function() {
+            chart.resize();
+        });
+    });
+</script>
+{% endif %}
+{% endblock %}

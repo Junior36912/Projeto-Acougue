@@ -16,6 +16,10 @@
                 <div class="card-body">
                     <h5 class="card-title">Vendas</h5>
                     <ul class="list-group">
+                        <a href="{{ url_for('relatorios_unificados', report_type='vendas_totais') }}" 
+                        class="list-group-item list-group-item-action">
+                            Vendas Totais
+                        </a>
                         <a href="{{ url_for('relatorios_unificados', report_type='vendas_periodo') }}" 
                            class="list-group-item list-group-item-action">
                             Por Período

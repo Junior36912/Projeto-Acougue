@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Seção de alertas -->
+<div class="alertas-estoque">
+    <h3>Alertas de Estoque</h3>
+    <table>
+        <!-- Mantenha a tabela de alertas existente -->
+    </table>
+</div>
+
+<!-- Seção de vendas do dia -->
+<div class="vendas-dia">
+    <h3>Vendas de Hoje (Total: {{ total_dia|format_currency }})</h3>
+    <table>
+        <thead>
+            <tr>
+                <th>Hora</th>
+                <th>Cliente</th>
+                <th>Total</th>
+                <th>Pagamento</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for venda in vendas_hoje %}
+            <tr>
+                <td>{{ venda.data|format_datetime('%H:%M') }}</td>
+                <td>{{ venda.cliente }}</td>
+                <td>{{ venda.total|format_currency }}</td>
+                <td>{{ venda.metodo_pagamento }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Açougue{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    {% if is_gerente %}
+    <div class="backup-section">
+        <a href="{{ url_for('download_backup') }}" class="backup-button">
+            <i class="fas fa-download"></i> Backup Completo
+        </a>
+    </div>
+    {% endif %}
+
+    <!-- Seção principal -->
+    <div class="metricas-principais">
+        <h2>Vendas de Hoje: {{ total_dia|format_currency }}</h2>
+        <div class="cards">
+            <div class="card">
+                <h3>Total de Vendas</h3>
+                <p>{{ vendas_hoje|length }}</p>
+            </div>
+            {% if is_gerente %}
+            <div class="card">
+                <h3>Ticket Médio</h3>
+                <p>{{ ticket_medio_hoje|format_currency }}</p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Lista de vendas -->
+    <section class="vendas-section">
+        <h3>Últimas Vendas</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Hora</th>
+                    <th>Cliente</th>
+                    <th>Total</th>
+                    <th>Pagamento</th>
+                    {% if is_gerente %}<th>Status</th>{% endif %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for venda in vendas_hoje %}
+                <tr>
+                    <td>{{ venda.data|format_datetime('%H:%M') }}</td>
+                    <td>{{ venda.cliente }}</td>
+                    <td>{{ venda.total|format_currency }}</td>
+                    <td>{{ venda.metodo_pagamento }}</td>
+                    {% if is_gerente %}
+                    <td>{{ venda.status_pagamento|capitalize }}</td>
+                    {% endif %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <!-- Alertas de estoque -->
+    <section class="alertas-section">
+        <h3>Produtos com Estoque Baixo</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Produto</th>
+                    <th>Quantidade</th>
+                    <th>Estoque Mínimo</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for produto in alertas_estoque %}
+                <tr>
+                    <td>{{ produto.nome }}</td>
+                    <td>{{ produto.quantidade }}</td>
+                    <td>{{ produto.estoque_minimo }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="3">Estoque em dia</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    {% if is_gerente %}
+    <!-- Seções exclusivas para gerentes -->
+    <section class="metodos-pagamento">
+        <h3>Pagamentos do Dia</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Método</th>
+                    <th>Quantidade</th>
+                    <th>Valor Total</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for metodo in metodos_pagamento %}
+                <tr>
+                    <td>{{ metodo.metodo_pagamento }}</td>
+                    <td>{{ metodo.quantidade }}</td>
+                    <td>{{ metodo.valor_total|format_currency }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+
+    <section class="top-produtos">
+        <h3>Produtos Mais Vendidos</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Produto</th>
+                    <th>Quantidade Vendida</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for produto in top_produtos %}
+                <tr>
+                    <td>{{ produto.nome }}</td>
+                    <td>{{ produto.quantidade_vendida }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="2">Sem dados</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </section>
+    {% endif %}
+</div>
+{% endblock %}
