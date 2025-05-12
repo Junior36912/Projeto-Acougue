@@ -7,17 +7,6 @@ from flask import current_app
 from datetime import datetime
 import logging
 
-@contextmanager
-def get_db_connection():
-    conn = sqlite3.connect('acougue.db')
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    
-    try:
-        yield conn
-    finally:
-        conn.close()
-
 DB_PATH = os.environ.get('DB_PATH', 'acougue.db')
 
 @contextmanager
@@ -116,6 +105,25 @@ def init_db():
         conn.commit()
 
 
+
+
+def get_fornecedores(search=None, page=1, per_page=10):
+    query = "SELECT * FROM fornecedores"
+    params = []
+    if search:
+        query += " WHERE nome LIKE ? OR cnpj LIKE ?"
+        params.extend([f'%{search}%', f'%{search}%'])
+    query += " ORDER BY nome LIMIT ? OFFSET ?"
+    offset = (page - 1) * per_page
+    params.extend([per_page, offset])
+    
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        return [dict(row) for row in cursor.fetchall()]
+
+
+    # ... (restante da lógica de paginação)
 
 # -----------------------
 # CRUD: Users
@@ -272,13 +280,6 @@ def get_produto_by_id(produto_id):
         cursor = conn.execute("SELECT * FROM produtos WHERE id = ?", (produto_id,))
         return cursor.fetchone()
 
-def get_all_produtos():
-    with get_db_connection() as conn:
-        cursor = conn.execute("SELECT * FROM produtos ORDER BY nome")
-        return cursor.fetchall()
-
-
-
 def update_produto(produto_id, **kwargs):
     fields = []
     params = []
@@ -302,6 +303,61 @@ def delete_produto(produto_id):
     with get_db_connection() as conn:
         conn.execute("DELETE FROM produtos WHERE id = ?", (produto_id,))
         conn.commit()
+
+# banco_dados.py - Atualização de queries com JOIN
+def get_all_produtos():
+    with get_db_connection() as conn:
+        cursor = conn.execute("""
+            SELECT p.*, f.nome as fornecedor 
+            FROM produtos p
+            LEFT JOIN fornecedores f ON p.fornecedor_id = f.id
+            ORDER BY p.nome
+        """)
+        return [dict(row) for row in cursor.fetchall()]
+    
+def listar_produtos(search: str = '', categoria: str = '', page: int = 1, per_page: int = 10):
+    # Query principal
+    base_query = '''
+        SELECT p.*, f.nome AS fornecedor
+        FROM produtos AS p
+        LEFT JOIN fornecedores AS f ON p.fornecedor_id = f.id
+        WHERE 1=1
+    '''
+    count_query = 'SELECT COUNT(*) as total FROM produtos p WHERE 1=1'
+    
+    params = []
+    count_params = []
+
+    # Filtros
+    if search:
+        base_query += " AND (p.nome LIKE ? OR p.codigo_barras = ?)"
+        count_query += " AND (p.nome LIKE ? OR p.codigo_barras = ?)"
+        search_term = f"%{search}%"
+        params.extend([search_term, search])
+        count_params.extend([search_term, search])
+    
+    if categoria:
+        base_query += " AND p.categoria = ?"
+        count_query += " AND p.categoria = ?"
+        params.append(categoria)
+        count_params.append(categoria)
+
+    # Ordenação e paginação
+    base_query += " ORDER BY p.nome LIMIT ? OFFSET ?"
+    offset = (page - 1) * per_page
+    params.extend([per_page, offset])
+
+    with get_db_connection() as conn:
+        # Total de registros
+        cursor = conn.cursor()
+        cursor.execute(count_query, count_params)
+        total = cursor.fetchone()['total']
+        
+        # Dados paginados
+        cursor.execute(base_query, params)
+        produtos = [dict(row) for row in cursor.fetchall()]
+        
+        return produtos, total
 
 # -----------------------
 # CRUD: Vendas
@@ -471,27 +527,6 @@ def create_user(username, email, password, role='funcionario'):
 # ---------------------------------------------------------------
 # CRUD de Produtos
 # ---------------------------------------------------------------
-
-def listar_produtos(search: str = '', categoria: str = ''):
-    query = '''
-        SELECT p.*, f.nome AS fornecedor
-        FROM produtos AS p
-        LEFT JOIN fornecedores AS f ON p.fornecedor_id = f.id
-        WHERE 1=1
-    '''
-    params = []
-    if search:
-        query += " AND (p.nome LIKE ? OR p.codigo_barras = ?)"
-        params.extend([f'%{search}%', search])
-    if categoria:
-        query += " AND p.categoria = ?"
-        params.append(categoria)
-    query += " ORDER BY p.nome"
-
-    with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute(query, params)
-        return [dict(row) for row in cursor.fetchall()]
 
 
 def inserir_produto(form: dict, foto):
@@ -678,13 +713,7 @@ def get_all_users():
 # -----------------------
 # CRUD: Produtos
 # -----------------------
-def get_all_produtos():
-    """Retorna todos os produtos com dados completos"""
-    with get_db_connection() as conn:
-        cursor = conn.execute(
-            'SELECT * FROM produtos ORDER BY nome'
-        )
-        return [dict(row) for row in cursor.fetchall()]
+
 
 # -----------------------
 # CRUD: Vendas

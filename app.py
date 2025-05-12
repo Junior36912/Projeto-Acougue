@@ -11,7 +11,7 @@ from functools import wraps
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import (
     Flask, jsonify, render_template, request, redirect, url_for,
-    send_from_directory, session, abort
+    send_from_directory, session, abort, send_file  
 )
 from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
@@ -77,6 +77,9 @@ class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-key-123'
     UPLOAD_FOLDER = 'static/uploads/produtos'
     DATABASE = 'acougue.db'
+    ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png'}
+    MAX_FILE_SIZE_MB = 2
+    MAX_CONTENT_LENGTH = 3 * 1024 * 1024
 app.config.from_object(Config)
 
 app.jinja_env.filters['format_datetime'] = format_datetime
@@ -86,6 +89,10 @@ app.config['UPLOAD_FOLDER'] = os.path.abspath(app.config['UPLOAD_FOLDER'])
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
 csrf = CSRFProtect(app)
+
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
 def backup_db():
     """Rotina de backup do banco de dados"""
@@ -233,13 +240,21 @@ def logout():
 @login_required
 @role_required('gerente')
 def listar_produtos():
+    page = request.args.get('page', 1, type=int)
+    per_page = 10
     search = request.args.get('search', '')
     categoria = request.args.get('categoria', '')
     
-    produtos = db_listar_produtos(search, categoria)
+    produtos, total = db_listar_produtos(search, categoria, page, per_page)
+    total_pages = (total + per_page - 1) // per_page
+    
     return render_template('produtos/listar.html',
                          produtos=produtos,
-                         categorias=get_categorias())
+                         categorias=get_categorias(),
+                         page=page,
+                         total_pages=total_pages,
+                         search=search,
+                         categoria=categoria)
 
 @app.route('/produtos/novo', methods=['GET', 'POST'])
 @login_required
@@ -250,16 +265,38 @@ def novo_produto():
             form_data = request.form
             foto = request.files.get('foto')
             
+            if foto and foto.filename != '':
+                # Verificar extensão
+                if not allowed_file(foto.filename):
+                    error_message = "Apenas arquivos JPG, JPEG e PNG são permitidos!"
+                    return render_template('produtos/novo.html',
+                                        error=error_message,
+                                        fornecedores=get_fornecedores(),
+                                        form_data=form_data)
+                
+                # Verificar tamanho
+                foto.stream.seek(0, os.SEEK_END)
+                file_size = foto.stream.tell()
+                foto.stream.seek(0)  # Resetar posição do arquivo
+                
+                if file_size > app.config['MAX_FILE_SIZE_MB'] * 1024 * 1024:
+                    error_message = f"Arquivo muito grande! Tamanho máximo: {app.config['MAX_FILE_SIZE_MB']}MB"
+                    return render_template('produtos/novo.html',
+                                        error=error_message,
+                                        fornecedores=get_fornecedores(),
+                                        form_data=form_data)
+        
             # Chama a função do banco_dados.py
             inserir_produto(form_data, foto)
             return redirect(url_for('listar_produtos'))
 
         except Exception as e:
-            logging.error(f"Erro ao cadastrar produto: {str(e)}", exc_info=True)
+            logging.error(f"Erro ao cadastrar produto: {str(e)}", exc_info=True)  
+            error_message = str(e) if app.debug else "Erro ao cadastrar produto. Verifique os dados."
             return render_template('produtos/novo.html',
-                               error=str(e),
-                               fornecedores=get_fornecedores(),
-                               form_data=request.form)
+                                error=error_message,
+                                fornecedores=get_fornecedores(),
+                                form_data=request.form)
 
     return render_template('produtos/novo.html',
                          fornecedores=get_fornecedores())
@@ -277,7 +314,27 @@ def editar_produto(id):
             form_data = request.form
             foto = request.files.get('foto')
             
-            # Chama a função do banco_dados.py
+            if foto and foto.filename != '':
+                # Verificar extensão
+                if not allowed_file(foto.filename):
+                    error_message = "Apenas arquivos JPG, JPEG e PNG são permitidos!"
+                    return render_template('produtos/novo.html',
+                                        error=error_message,
+                                        fornecedores=get_fornecedores(),
+                                        form_data=form_data)
+                
+                # Verificar tamanho
+                foto.stream.seek(0, os.SEEK_END)
+                file_size = foto.stream.tell()
+                foto.stream.seek(0)  
+                
+                if file_size > app.config['MAX_FILE_SIZE_MB'] * 1024 * 1024:
+                    error_message = f"Arquivo muito grande! Tamanho máximo: {app.config['MAX_FILE_SIZE_MB']}MB"
+                    return render_template('produtos/novo.html',
+                                        error=error_message,
+                                        fornecedores=get_fornecedores(),
+                                        form_data=form_data)
+
             atualizar_produto(id, form_data, foto)
             return redirect(url_for('listar_produtos'))
 
@@ -300,9 +357,8 @@ def excluir_produto_route(id):
         excluir_produto(id)
         return redirect(url_for('listar_produtos'))
     except Exception as e:
-        logging.error(f"Erro ao excluir produto: {str(e)}")
+        logging.error(f"Erro ao excluir produto: {str(e)}", exc_info=True)  # Adicionar exc_info=True
         return redirect(url_for('listar_produtos', error="Erro ao excluir produto"))
-
 # ---------------------------------------------------------------
 # Gestão de Fornecedores
 # ---------------------------------------------------------------
@@ -499,7 +555,7 @@ def parse_date(date_str, default):
 def relatorios_unificados(report_type):
     report_titles = {
         'vendas_totais': 'Vendas Totais',
-        # Mantemos apenas o título para vendas_totais aqui
+        
     }
 
     # Relatório de Vendas Totais (HTML)
@@ -951,3 +1007,12 @@ if __name__ == '__main__':
         app.run(debug=True)
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown()
+        
+        
+@app.errorhandler(404)
+def page_not_found(e):
+    return render_template('errors/404.html'), 404
+
+@app.errorhandler(500)
+def internal_server_error(e):
+    return render_template('errors/500.html'), 500
