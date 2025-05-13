@@ -373,31 +373,6 @@ def listar_fornecedores():
     return render_template('fornecedores/listar.html', fornecedores=fornecedores)
 
 
-# função de validação de CNPJ
-def validar_cnpj(cnpj):
-    cnpj = ''.join(filter(str.isdigit, cnpj))
-    
-    if len(cnpj) != 14:
-        return False
-    
-    # Verifica se todos os dígitos são iguais
-    if len(set(cnpj)) == 1:
-        return False
-    
-    # Cálculo do primeiro dígito verificador
-    pesos1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
-    soma = sum(int(cnpj[i]) * pesos1[i] for i in range(12))
-    dig1 = 11 - (soma % 11)
-    dig1 = dig1 if dig1 < 10 else 0
-    
-    # Cálculo do segundo dígito verificador
-    pesos2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
-    soma = sum(int(cnpj[i]) * pesos2[i] for i in range(13))
-    dig2 = 11 - (soma % 11)
-    dig2 = dig2 if dig2 < 10 else 0
-    
-    # Verifica se os dígitos calculados coincidem com os informados
-    return int(cnpj[12]) == dig1 and int(cnpj[13]) == dig2
 
 @app.route('/fornecedores/novo', methods=['GET', 'POST'])
 @login_required
@@ -505,7 +480,8 @@ def nova_venda():
 
     # GET: simplesmente listar produtos via função reutilizável
     produtos = listar_produtos_simples()
-    return render_template('vendas/nova.html', produtos=produtos)
+    current_date = datetime.now().strftime('%Y-%m-%d')
+    return render_template('vendas/nova.html', produtos=produtos, current_date=current_date)
 
     
 @app.route('/vendas/pagamento_prazo/pagar/<venda_id>', methods=['POST'])

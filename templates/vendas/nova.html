@@ -3,9 +3,12 @@
 {% block title %}Nova Venda{% endblock %}
 
 {% block content %}
+<meta name="csrf-token" content="{{ csrf_token() }}">
 <div class="container-venda">
     <header class="mb-4">
         <h1 class="h2 text-primary">Nova Venda</h1>
+        
+
     </header>
 
     <div class="grid-venda">
@@ -81,7 +84,7 @@
                             id="data_vencimento" 
                             name="data_vencimento" 
                             class="form-control"
-                            min="{{ now().strftime('%Y-%m-%d') }}"> 
+                            min="{{ current_date }}">
                     </div>
                 </div>
 
@@ -92,7 +95,7 @@
                 <div class="mb-3">
                     <h5 class="text-primary">Total: <span id="total-venda">R$ 0,00</span></h5>
                 </div>
-
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                 <button type="submit" class="btn btn-primary btn-block">Finalizar Venda</button>
             </form>
         </aside>
@@ -102,6 +105,7 @@
 
 {% block scripts %}
 <script>
+const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 document.addEventListener('DOMContentLoaded', () => {
     const carrinho = {};
     const form = document.getElementById('form-venda');
@@ -141,6 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Adicionar produtos
+    // Adicionar produtos
     document.querySelectorAll('.btn-adicionar').forEach(btn => {
         btn.addEventListener('click', () => {
             const row = btn.closest('.produto-item');
@@ -149,8 +154,9 @@ document.addEventListener('DOMContentLoaded', () => {
             if (tipo === 'quilo') {
                 const precoInput = row.querySelector('.preco-quilo');
                 const pesoInput = row.querySelector('.peso-quilo');
-                preco = parseFloat(precoInput.value);
-                quantidade = parseFloat(pesoInput.value);
+                // Replace commas with dots for proper parsing
+                preco = parseFloat(precoInput.value.replace(',', '.'));
+                quantidade = parseFloat(pesoInput.value.replace(',', '.'));
                 if (!preco || preco <= 0) return alert('Informe o preço por quilo!');
                 if (!quantidade || quantidade <= 0) return alert('Informe o peso!');
             } else {
@@ -205,13 +211,16 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const response = await fetch("{{ url_for('nova_venda') }}", {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'X-CSRFToken': csrfToken
+                },
+                body: JSON.stringify({
                     nome_cliente: form.nome_cliente.value,
                     cpf: form.cpf.value,
                     metodo_pagamento: metodoPagamento,
                     data_vencimento: dataVencimento,
-                    itens 
+                    itens: itens
                 })
             });
             

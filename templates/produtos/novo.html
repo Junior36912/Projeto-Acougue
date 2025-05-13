@@ -13,6 +13,7 @@
     <h1 class="mb-4">Cadastrar Novo Produto</h1>
 
     <form method="POST" enctype="multipart/form-data">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <!-- Nome -->
         <div class="form-group mb-3">
             <label for="nome">Nome:</label>

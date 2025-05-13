@@ -34,6 +34,7 @@
                     <td>{{ usuario.email }}</td>
                     <td>
                         <form method="POST" action="{{ url_for('editar_usuario', id=usuario.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                             <select name="role" class="form-select" 
                                     onchange="this.form.submit()"
                                     style="width: auto; display: inline-block;">
@@ -49,6 +50,7 @@
                     <td>
                         <form method="POST" action="{{ url_for('excluir_usuario', id=usuario.id) }}"
                               onsubmit="return confirm('Tem certeza que deseja excluir este usuário?');">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                             <button type="submit" class="btn btn-danger btn-sm">
                                 <i class="fas fa-trash"></i>
                             </button>

@@ -9,6 +9,7 @@
     {% endif %}
 
     <form method="POST" class="form-container">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <div class="form-group">
             <label for="nome">Nome do Fornecedor *</label>
             <input type="text" class="form-control" id="nome" name="nome" 
