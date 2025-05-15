@@ -91,13 +91,14 @@ def init_db():
             )
         ''')
         # Tabela de Itens de Venda
+        # No arquivo banco_dados.py, na criação da tabela venda_itens, altere:
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS venda_itens (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 venda_id TEXT NOT NULL REFERENCES vendas(id)
-                  ON DELETE CASCADE ON UPDATE CASCADE,
+                ON DELETE CASCADE ON UPDATE CASCADE, 
                 produto_id INTEGER NOT NULL REFERENCES produtos(id)
-                  ON DELETE RESTRICT ON UPDATE CASCADE,
+                ON DELETE CASCADE ON UPDATE CASCADE, 
                 quantidade INTEGER NOT NULL,
                 preco_unitario NUMERIC NOT NULL
             )
@@ -123,7 +124,7 @@ def get_fornecedores(search=None, page=1, per_page=10):
         return [dict(row) for row in cursor.fetchall()]
 
 
-    # ... (restante da lógica de paginação)
+    
 
 # -----------------------
 # CRUD: Users
@@ -304,6 +305,29 @@ def delete_produto(produto_id):
         conn.execute("DELETE FROM produtos WHERE id = ?", (produto_id,))
         conn.commit()
 
+def excluir_produto(produto_id: int):
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        
+        # Remove verificação de venda_itens
+        cursor.execute('SELECT foto FROM produtos WHERE id = ?', (produto_id,))
+        row = cursor.fetchone()
+        foto = row['foto'] if row else None
+        
+        try:
+            cursor.execute('DELETE FROM produtos WHERE id = ?', (produto_id,))
+            conn.commit()
+        except sqlite3.IntegrityError as e:
+            if 'FOREIGN KEY' in str(e):
+                raise ValueError("Produto vinculado a registros dependentes")
+            raise
+    
+    if foto:
+        try:
+            os.remove(os.path.join(current_app.config['UPLOAD_FOLDER'], foto))
+        except Exception as rm_err:
+            logging.error(f"Erro ao remover foto: {rm_err}")
+
 # banco_dados.py - Atualização de queries com JOIN
 def get_all_produtos():
     with get_db_connection() as conn:
@@ -451,7 +475,10 @@ def processar_venda(venda_id, venda_data, usuario_id):
 
 def listar_produtos_simples():
     with get_db_connection() as conn:
-        cursor = conn.execute("SELECT id, nome, preco, quantidade, tipo_venda FROM produtos")
+        cursor = conn.execute("""
+            SELECT id, nome, preco, quantidade, tipo_venda, foto 
+            FROM produtos
+        """)
         return [dict(row) for row in cursor.fetchall()]
 
 # -----------------------

@@ -8,24 +8,21 @@ def popular_dados_teste():
     with get_db_connection() as conn:
         cursor = conn.cursor()
 
-        # Adicione antes de criar os dados:
+        # Limpar tabelas na ordem correta (respeitando relações de chave estrangeira)
         cursor.execute("DELETE FROM venda_itens")
         cursor.execute("DELETE FROM vendas")
         cursor.execute("DELETE FROM produtos")
         cursor.execute("DELETE FROM fornecedores")
         cursor.execute("DELETE FROM users")
-        cursor.execute("UPDATE SQLITE_SEQUENCE SET SEQ=0 WHERE NAME='users'")  # Reset autoincrement
+
+        # Resetar sequências de autoincremento (específico do SQLite)
+        cursor.execute("UPDATE SQLITE_SEQUENCE SET SEQ=0 WHERE NAME='users'")
         cursor.execute("UPDATE SQLITE_SEQUENCE SET SEQ=0 WHERE NAME='fornecedores'")
         cursor.execute("UPDATE SQLITE_SEQUENCE SET SEQ=0 WHERE NAME='produtos'")
-        conn.commit()
+        cursor.execute("UPDATE SQLITE_SEQUENCE SET SEQ=0 WHERE NAME='vendas'")
+        cursor.execute("UPDATE SQLITE_SEQUENCE SET SEQ=0 WHERE NAME='venda_itens'")  # Adicionado
 
-        # Resetar tabelas na ordem correta de dependência
-        cursor.execute("DELETE FROM venda_itens")
-        cursor.execute("DELETE FROM vendas")
-        cursor.execute("DELETE FROM produtos")
-        cursor.execute("DELETE FROM fornecedores")
-        cursor.execute("DELETE FROM users")
-        conn.commit()  # Commit crítico aqui
+        conn.commit()
 
         # 1. Criar usuário admin
         cursor.execute('''
@@ -37,81 +34,129 @@ def popular_dados_teste():
             generate_password_hash("admin123"),
             "gerente"
         ))
-        conn.commit()  # Commit para gerar o ID
+        conn.commit()
         usuario_id = cursor.lastrowid
         print(f"🆔 Usuário criado com ID: {usuario_id}")
 
-        # 2. Criar fornecedor
+        # 2. Inserir fornecedor
         cursor.execute('''
             INSERT INTO fornecedores (nome, cnpj, contato, endereco)
             VALUES (?, ?, ?, ?)
         ''', (
-            "Açougue Central",
+            "Açougue JT",
             "12.345.678/0001-99",
             "(11) 98765-4321",
             "Av. das Carnes, 456 - Centro"
         ))
-        conn.commit()  # Commit para gerar o ID
+        conn.commit()
         fornecedor_id = cursor.lastrowid
         print(f"🏭 Fornecedor criado com ID: {fornecedor_id}")
 
         # 3. Inserir produtos
         produtos = [
-            ('Picanha Bovino', 'Carnes Nobres', 99.90, 50, 'quilo', 10, fornecedor_id),
-            ('Coxão Mole', 'Carnes', 47.50, 30, 'quilo', 5, fornecedor_id),
-            ('Linguiça Toscana', 'Embutidos', 28.90, 100, 'unidade', 20, fornecedor_id)
+            # Carnes BOI
+            ('Coração', 'BOI', 0.0, 0, 'quilo', 0, fornecedor_id, 'coracao.png'),
+            ('Fígado', 'BOI', 0.0, 0, 'quilo', 0, fornecedor_id, 'figado.png'),
+            ('Bisteca', 'BOI', 0.0, 0, 'quilo', 0, fornecedor_id, 'bisteca-bolvina.png'),
+            ('Paleta', 'BOI', 0.0, 0, 'quilo', 0, fornecedor_id, 'paleta.png'),
+            ('Costela', 'BOI', 0.0, 0, 'quilo', 0, fornecedor_id, 'costela-bolvina.png'),
+            ('Polpa ou Coxa Mole', 'BOI', 0.0, 0, 'quilo', 0, fornecedor_id, 'coxao-mole.png'),
+            ('Patim ou Caturrino', 'BOI', 0.0, 0, 'quilo', 0, fornecedor_id, 'patim.png'),
+            ('Alcatra', 'BOI', 0.0, 0, 'quilo', 0, fornecedor_id, 'alcatra.png'),
+            ('Mão de Vaca', 'BOI', 0.0, 0, 'quilo', 0, fornecedor_id, 'mao-de-vaca.png'),
+            ('Filé', 'BOI', 0.0, 0, 'quilo', 0, fornecedor_id, 'file-mignon.png'),
+            ('Ossada', 'BOI', 0.0, 0, 'quilo', 0, fornecedor_id, None),  # Imagem faltante: ossada.png
+            ('Panelada (Prato)', 'BOI', 0.0, 0, 'quilo', 0, fornecedor_id, 'panelada.jpeg'),
+            ('Picanha', 'BOI', 0.0, 0, 'quilo', 0, fornecedor_id, 'picanha.webp'),
+            ('Demais Carnes Magicas', 'BOI', 0.0, 0, 'quilo', 0, fornecedor_id, None),  # Imagem faltante: demais-carnes-magicas.png
+            ('Carne Moída Pronta', 'BOI', 0.0, 0, 'quilo', 0, fornecedor_id, 'carne-moida.png'),
+
+            # Carnes PORCO
+            ('Com Toucinho', 'PORCO', 0.0, 0, 'quilo', 0, fornecedor_id, 'com-toucinho.png'),
+            ('Sem Toucinho', 'PORCO', 0.0, 0, 'quilo', 0, fornecedor_id, 'sem-toucinho.png'),
+
+            # Carneiro
+            ('Carneiro', 'CARNEIRO', 0.0, 0, 'quilo', 0, fornecedor_id, 'carneiro.png'),
+
+            # Frangos
+            ('Abatido', 'FRANGOS', 0.0, 0, 'quilo', 0, fornecedor_id, 'frango-fresco.png'),
+            ('Peito', 'FRANGOS', 0.0, 0, 'quilo', 0, fornecedor_id, 'peito-frango.webp'),
+            ('Coxa', 'FRANGOS', 0.0, 0, 'quilo', 0, fornecedor_id, 'coxa-frango.png'),
+            ('Sobrecoxa', 'FRANGOS', 0.0, 0, 'quilo', 0, fornecedor_id, 'sobrecoxa.png'),
+
+            # Congelados
+            ('Linguiça Toscana Dália', 'CONGELADOS', 0.0, 0, 'quilo', 0, fornecedor_id, 'linguica-toscana-dalia.png'),
+            ('Aurora', 'CONGELADOS', 0.0, 0, 'quilo', 0, fornecedor_id, 'linguica-toscana-aurora.webp'),
+            ('Linguiça Calabresa Dália', 'CONGELADOS', 0.0, 0, 'quilo', 0, fornecedor_id, 'linguica-calabresa-dalia.png'),
+            ('Seara ou Perdigão', 'CONGELADOS', 0.0, 0, 'quilo', 0, fornecedor_id, 'linguica-perdigao.png'),
+            ('Bisteca Suína', 'CONGELADOS', 0.0, 0, 'quilo', 0, fornecedor_id, 'bisteca-suina.png'),
+            ('Pernil Suíno', 'CONGELADOS', 0.0, 0, 'quilo', 0, fornecedor_id, 'pernil-suino.png'),
+            ('Lapa de Filé', 'CONGELADOS', 0.0, 0, 'quilo', 0, fornecedor_id, 'capa-file.png'),
+            ('Bacon', 'CONGELADOS', 0.0, 0, 'quilo', 0, fornecedor_id, 'bacon.png'),
+            ('Presunto', 'CONGELADOS', 0.0, 0, 'quilo', 0, fornecedor_id, 'presunto.png'),
+
+            # Bebidas (Novos Produtos)
+            ('Budweiser 350ml', 'BEBIDAS', 0.0, 0, 'unidade', 0, fornecedor_id, 'budweiser-350ml.png'),
+            ('Budweiser 550ml', 'BEBIDAS', 0.0, 0, 'unidade', 0, fornecedor_id, 'budweiser-550ml.webp'),
+            ('Corona 330ml', 'BEBIDAS', 0.0, 0, 'unidade', 0, fornecedor_id, 'corona-330ml.png'),
+            ('Guaraná 350ml', 'BEBIDAS', 0.0, 0, 'unidade', 0, fornecedor_id, 'guaran_350.png'),
+            ('Guaraná 1L', 'BEBIDAS', 0.0, 0, 'unidade', 0, fornecedor_id, 'guarana-1l.png'),
+            ('Guaraná 2L', 'BEBIDAS', 0.0, 0, 'unidade', 0, fornecedor_id, 'guarana-2l.webp'),
+            ('H2O', 'BEBIDAS', 0.0, 0, 'unidade', 0, fornecedor_id, 'h2o.png'),
+            ('Heineken Original', 'BEBIDAS', 0.0, 0, 'unidade', 0, fornecedor_id, 'heineken-original-bottle.png'),
+            ('Skol 350ml', 'BEBIDAS', 0.0, 0, 'unidade', 0, fornecedor_id, 'skol-350ml.png'),
+            ('Stella Artois 600ml', 'BEBIDAS', 0.0, 0, 'unidade', 0, fornecedor_id, 'stella-600ml.png'),
+            ('Sukita 2L', 'BEBIDAS', 0.0, 0, 'unidade', 0, fornecedor_id, 'sukita-2l.png'),
+            ('Pepsi 1L', 'BEBIDAS', 0.0, 0, 'unidade', 0, fornecedor_id, 'pepsi-1l.png'),
+            ('Pepsi 2L', 'BEBIDAS', 0.0, 0, 'unidade', 0, fornecedor_id, 'pepsi-2l.png'),
+            ('Pepsi 350ml', 'BEBIDAS', 0.0, 0, 'unidade', 0, fornecedor_id, 'pepsi-350ml.png'),
         ]
-        
+
         for produto in produtos:
+            nome, categoria, preco, quantidade, tipo_venda, estoque_minimo, fornecedor_id, foto = produto
+            if foto:
+                foto = f'uploads/produtos/{foto}'
+            else:
+                foto = None  # Garante NULL explícito para imagens faltantes
+            
             cursor.execute('''
                 INSERT INTO produtos (
-                    nome, categoria, preco, quantidade, tipo_venda, 
-                    estoque_minimo, fornecedor_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', produto)
-        conn.commit()
-        print(f"📦 {len(produtos)} produtos inseridos")
-        
-        # Após inserir produtos, verifique os IDs:
-        cursor.execute("SELECT id FROM produtos")
-        produto_ids = [row['id'] for row in cursor.fetchall()]
-        print(f"🔍 IDs de produtos disponíveis: {produto_ids}")  # Deve ser [1, 2, 3]
+                    nome, categoria, preco, quantidade, tipo_venda,
+                    estoque_minimo, fornecedor_id, foto
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                nome, categoria, preco, quantidade, tipo_venda,
+                estoque_minimo, fornecedor_id, foto
+            ))
 
-        # 4. Criar vendas
-        
-        vendas = [
-            ('V20231015120000', '123.456.789-00', 297.80, 'PIX', usuario_id, 'pago', None),
-            ('V20231015120001', '987.654.321-00', 150.00, 'pagamento_prazo', usuario_id, 'pendente', '2023-11-15')
-        ]
-        
-        for venda in vendas:
-            cursor.execute('''
-                INSERT INTO vendas 
-                (id, cliente_cpf, total, metodo_pagamento, usuario_id, status_pagamento, data_vencimento)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', venda)
-        conn.commit()
-        print(f"💰 {len(vendas)} vendas registradas")
+        conn.commit()  # Commit crucial para salvar todos os produtos
 
-        # 5. Adicionar itens às vendas
-        # Substitua a seção de itens de venda por:
-        itens_venda = [
-            # Venda 1: Picanha (ID 1) e Linguiça (ID 3)
-            ('V20231015120000', 1, 2.0, 99.90),  
-            ('V20231015120000', 3, 5, 28.90),
-            
-            # Venda 2: Coxão Mole (ID 2)
-            ('V20231015120001', 2, 3.0, 47.50)
+        # 4. Criar vendas de exemplo (corrigido)
+        import uuid  # Adicione no topo do arquivo
+
+        # Gerar ID único para a venda
+        venda_id = str(uuid.uuid4())
+        data_venda = datetime.now() - timedelta(days=1)
+
+        # Inserir venda principal
+        cursor.execute('''
+            INSERT INTO vendas (id, data, total, usuario_id, metodo_pagamento)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (venda_id, data_venda, 199.90, usuario_id, 'dinheiro'))
+        conn.commit()
+
+        # Inserir itens da venda (exemplo)
+        produtos_venda = [
+            (venda_id, 1, 2, 99.95),  # Produto ID 1, 2 unidades
+            (venda_id, 3, 1, 50.00)    # Produto ID 3, 1 unidade
         ]
-        
-        for item in itens_venda:
+
+        for item in produtos_venda:
             cursor.execute('''
-                INSERT INTO venda_itens 
-                (venda_id, produto_id, quantidade, preco_unitario)
+                INSERT INTO venda_itens (venda_id, produto_id, quantidade, preco_unitario)
                 VALUES (?, ?, ?, ?)
             ''', item)
         conn.commit()
-        print(f"🛒 {len(itens_venda)} itens de venda adicionados")
 
     print("✅ Todos os dados de teste foram inseridos com sucesso!")
 

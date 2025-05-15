@@ -19,6 +19,7 @@
             <table class="table">
                 <thead>
                     <tr>
+                        <th>Imagem</th> <!-- Nova coluna -->
                         <th>Produto</th>
                         <th>Preço</th>
                         <th>Estoque</th>
@@ -28,6 +29,16 @@
                 <tbody>
                     {% for p in produtos %}
                     <tr class="produto-item align-middle" data-id="{{ p.id }}" data-estoque="{{ p.quantidade }}" data-tipo="{{ p.tipo_venda }}">
+                        <td> <!-- Nova célula para imagem -->
+                            {% if p.foto %}
+                                <img src="{{ url_for('static', filename=p.foto) }}" 
+                                     alt="{{ p.nome }}"
+                                     class="img-thumbnail"
+                                     style="max-width: 50px; height: auto;">
+                            {% else %}
+                                <div class="no-image">-</div>
+                            {% endif %}
+                        </td>
                         <td>{{ p.nome }}</td>
                         <td>
                             {% if p.tipo_venda == 'quilo' %}
@@ -51,6 +62,10 @@
                                 <i class="fas fa-cart-plus"></i>
                             </button>
                         </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" class="text-center">Nenhum produto encontrado</td>
                     </tr>
                     {% endfor %}
                 </tbody>

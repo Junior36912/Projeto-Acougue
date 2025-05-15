@@ -356,9 +356,11 @@ def excluir_produto_route(id):
     try:
         excluir_produto(id)
         return redirect(url_for('listar_produtos'))
+    except ValueError as ve:
+        return redirect(url_for('listar_produtos', error=str(ve)))
     except Exception as e:
-        logging.error(f"Erro ao excluir produto: {str(e)}", exc_info=True)  # Adicionar exc_info=True
-        return redirect(url_for('listar_produtos', error="Erro ao excluir produto"))
+        logging.error(f"Erro ao excluir produto: {str(e)}", exc_info=True)
+        return redirect(url_for('listar_produtos', error="Erro interno ao excluir produto"))
 # ---------------------------------------------------------------
 # Gestão de Fornecedores
 # ---------------------------------------------------------------
