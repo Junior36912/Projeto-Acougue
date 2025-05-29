@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualização de Logs - Sistema de Açougue</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #8b0000;
+            --secondary-color: #f5f5f5;
+            --accent-color: #d4af37;
+            --text-dark: #333;
+            --text-light: #fff;
+        }
+        
+        body {
+            background-color: #f8f9fa;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .navbar {
+            background-color: var(--primary-color);
+        }
+        
+        .card {
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+            transition: transform 0.2s;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .card-header {
+            background-color: var(--primary-color);
+            color: var(--text-light);
+            border-radius: 10px 10px 0 0 !important;
+        }
+        
+        .log-entry {
+            border-left: 4px solid var(--primary-color);
+            padding: 10px 15px;
+            margin-bottom: 10px;
+            background-color: white;
+            border-radius: 4px;
+        }
+        
+        .log-entry:hover {
+            background-color: var(--secondary-color);
+        }
+        
+        .log-info {
+            border-left-color: #17a2b8;
+        }
+        
+        .log-warning {
+            border-left-color: #ffc107;
+        }
+        
+        .log-error {
+            border-left-color: #dc3545;
+        }
+        
+        .log-critical {
+            border-left-color: #6c757d;
+        }
+        
+        .log-details {
+            display: none;
+            background-color: #f8f9fa;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 5px;
+            font-size: 0.9em;
+        }
+        
+        .log-badge {
+            font-size: 0.8em;
+            padding: 4px 8px;
+            border-radius: 12px;
+        }
+        
+        .filter-section {
+            background-color: white;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .stats-card {
+            text-align: center;
+            padding: 15px;
+        }
+        
+        .stats-number {
+            font-size: 2rem;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+        
+        .stats-label {
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+        
+        .btn-primary {
+            background-color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+        
+        .btn-primary:hover {
+            background-color: #6d0000;
+            border-color: #6d0000;
+        }
+        
+        .btn-outline-primary {
+            color: var(--primary-color);
+            border-color: var(--primary-color);
+        }
+        
+        .btn-outline-primary:hover {
+            background-color: var(--primary-color);
+            color: white;
+        }
+        
+        .log-action {
+            font-weight: bold;
+        }
+        
+        .log-user {
+            color: var(--primary-color);
+            font-weight: 500;
+        }
+        
+        .timestamp {
+            color: #6c757d;
+            font-size: 0.85em;
+        }
+        
+        .log-level-badge {
+            display: inline-block;
+            width: 80px;
+            text-align: center;
+            font-weight: 500;
+        }
+        
+        .log-details-table {
+            font-size: 0.9em;
+            width: 100%;
+        }
+        
+        .log-details-table td {
+            padding: 5px 10px;
+            vertical-align: top;
+        }
+        
+        .log-details-table tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        
+        .action-btn {
+            margin: 0 3px;
+            padding: 5px 10px;
+        }
+        
+        .filters-row {
+            background-color: #e9ecef;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+        
+        .log-search {
+            position: relative;
+        }
+        
+        .log-search i {
+            position: absolute;
+            left: 10px;
+            top: 10px;
+            color: #6c757d;
+        }
+        
+        .log-search input {
+            padding-left: 35px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-file-alt me-2"></i>Logs do Sistema
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="#"><i class="fas fa-home me-1"></i> Dashboard</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="#"><i class="fas fa-file-alt me-1"></i> Logs</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#"><i class="fas fa-cog me-1"></i> Configurações</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#"><i class="fas fa-sign-out-alt me-1"></i> Sair</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row mb-4">
+            <div class="col-md-8">
+                <h2><i class="fas fa-history me-2"></i>Registro de Atividades</h2>
+                <p class="text-muted">Monitoramento de todas as ações realizadas no sistema</p>
+            </div>
+            <div class="col-md-4 text-md-end">
+                <button class="btn btn-outline-primary">
+                    <i class="fas fa-download me-1"></i> Exportar Logs
+                </button>
+            </div>
+        </div>
+
+        <!-- Cards de Estatísticas -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card stats-card">
+                    <div class="stats-number">1,248</div>
+                    <div class="stats-label">Total de Logs</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card">
+                    <div class="stats-number">942</div>
+                    <div class="stats-label">Informações</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card">
+                    <div class="stats-number">178</div>
+                    <div class="stats-label">Alertas</div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card stats-card">
+                    <div class="stats-number">128</div>
+                    <div class="stats-label">Erros</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Filtros -->
+        <div class="filter-section">
+            <div class="filters-row row">
+                <div class="col-md-6 log-search mb-3 mb-md-0">
+                    <i class="fas fa-search"></i>
+                    <input type="text" class="form-control" placeholder="Pesquisar em logs...">
+                </div>
+                <div class="col-md-6">
+                    <div class="row">
+                        <div class="col-6">
+                            <select class="form-select">
+                                <option selected>Todos os níveis</option>
+                                <option>Informação</option>
+                                <option>Aviso</option>
+                                <option>Erro</option>
+                                <option>Crítico</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <select class="form-select">
+                                <option selected>Todas as ações</option>
+                                <option>Login</option>
+                                <option>Logout</option>
+                                <option>Venda</option>
+                                <option>Cadastro</option>
+                                <option>Alteração</option>
+                                <option>Exclusão</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="row mt-3">
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">Usuário</label>
+                    <select class="form-select">
+                        <option selected>Todos os usuários</option>
+                        <option>João Silva</option>
+                        <option>Maria Oliveira</option>
+                        <option>Carlos Souza</option>
+                        <option>Sistema</option>
+                    </select>
+                </div>
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">De</label>
+                    <input type="date" class="form-control">
+                </div>
+                <div class="col-md-3 mb-3">
+                    <label class="form-label">Até</label>
+                    <input type="date" class="form-control" value="2023-12-31">
+                </div>
+                <div class="col-md-3 d-flex align-items-end mb-3">
+                    <button class="btn btn-primary w-100">
+                        <i class="fas fa-filter me-1"></i> Aplicar Filtros
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Lista de Logs -->
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="fas fa-list me-2"></i>Registros Recentes</span>
+                <div>
+                    <span class="me-2">Exibindo 15 de 1,248 registros</span>
+                    <div class="btn-group">
+                        <button class="btn btn-sm btn-outline-primary"><i class="fas fa-chevron-left"></i></button>
+                        <button class="btn btn-sm btn-outline-primary"><i class="fas fa-chevron-right"></i></button>
+                    </div>
+                </div>
+            </div>
+            <div class="card-body">
+                <!-- Log Entry 1 -->
+                <div class="log-entry log-info">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <span class="log-level-badge badge bg-info">INFO</span>
+                            <span class="log-action">Login realizado</span>
+                            por <span class="log-user">João Silva</span>
+                        </div>
+                        <div class="timestamp">29/05/2023 14:23:45</div>
+                    </div>
+                    <div class="log-details">
+                        <table class="log-details-table">
+                            <tr>
+                                <td width="120"><strong>IP:</strong></td>
+                                <td>192.168.1.105</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Navegador:</strong></td>
+                                <td>Chrome 112.0.0.0</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Resultado:</strong></td>
+                                <td>Sucesso</td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="mt-2">
+                        <button class="btn btn-sm btn-outline-secondary action-btn toggle-details">
+                            <i class="fas fa-eye me-1"></i> Detalhes
+                        </button>
+                        <button class="btn btn-sm btn-outline-secondary action-btn">
+                            <i class="fas fa-user me-1"></i> Ver Usuário
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Log Entry 2 -->
+                <div class="log-entry">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <span class="log-level-badge badge bg-primary">INFO</span>
+                            <span class="log-action">Nova venda registrada</span>
+                            por <span class="log-user">Maria Oliveira</span>
+                        </div>
+                        <div class="timestamp">29/05/2023 14:15:32</div>
+                    </div>
+                    <div class="log-details">
+                        <table class="log-details-table">
+                            <tr>
+                                <td width="120"><strong>ID Venda:</strong></td>
+                                <td>V20230529141532</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Valor:</strong></td>
+                                <td>R$ 247,50</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Método:</strong></td>
+                                <td>Cartão de Crédito</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Itens:</strong></td>
+                                <td>
+                                    Picanha (2kg), Alcatra (1.5kg), Linguiça (1kg)
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="mt-2">
+                        <button class="btn btn-sm btn-outline-secondary action-btn toggle-details">
+                            <i class="fas fa-eye me-1"></i> Detalhes
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary action-btn">
+                            <i class="fas fa-receipt me-1"></i> Ver Venda
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Log Entry 3 -->
+                <div class="log-entry log-warning">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <span class="log-level-badge badge bg-warning">ALERTA</span>
+                            <span class="log-action">Produto próximo do vencimento</span>
+                            detectado pelo <span class="log-user">Sistema</span>
+                        </div>
+                        <div class="timestamp">29/05/2023 13:45:11</div>
+                    </div>
+                    <div class="log-details">
+                        <table class="log-details-table">
+                            <tr>
+                                <td width="120"><strong>Produto:</strong></td>
+                                <td>Linguiça Toscana</td>
+                            </tr>
+                            <tr>
+                                <td><strong>ID:</strong></td>
+                                <td>PROD-8452</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Validade:</strong></td>
+                                <td>05/06/2023</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Dias restantes:</strong></td>
+                                <td>7 dias</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Estoque:</strong></td>
+                                <td>15 unidades</td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="mt-2">
+                        <button class="btn btn-sm btn-outline-secondary action-btn toggle-details">
+                            <i class="fas fa-eye me-1"></i> Detalhes
+                        </button>
+                        <button class="btn btn-sm btn-outline-warning action-btn">
+                            <i class="fas fa-box me-1"></i> Ver Produto
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Log Entry 4 -->
+                <div class="log-entry">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <span class="log-level-badge badge bg-primary">INFO</span>
+                            <span class="log-action">Produto atualizado</span>
+                            por <span class="log-user">Carlos Souza</span>
+                        </div>
+                        <div class="timestamp">29/05/2023 12:30:22</div>
+                    </div>
+                    <div class="log-details">
+                        <table class="log-details-table">
+                            <tr>
+                                <td width="120"><strong>Produto:</strong></td>
+                                <td>Picanha Argentada</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Alterações:</strong></td>
+                                <td>
+                                    <ul>
+                                        <li>Preço: R$ 59.90 → R$ 62.90</li>
+                                        <li>Estoque: 42 → 38 unidades</li>
+                                    </ul>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="mt-2">
+                        <button class="btn btn-sm btn-outline-secondary action-btn toggle-details">
+                            <i class="fas fa-eye me-1"></i> Detalhes
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary action-btn">
+                            <i class="fas fa-edit me-1"></i> Ver Produto
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Log Entry 5 -->
+                <div class="log-entry log-error">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <span class="log-level-badge badge bg-danger">ERRO</span>
+                            <span class="log-action">Falha no processamento de venda</span>
+                            por <span class="log-user">Maria Oliveira</span>
+                        </div>
+                        <div class="timestamp">29/05/2023 11:15:07</div>
+                    </div>
+                    <div class="log-details">
+                        <table class="log-details-table">
+                            <tr>
+                                <td width="120"><strong>Erro:</strong></td>
+                                <td>Estoque insuficiente</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Produto:</strong></td>
+                                <td>Costela Bovina (ID: PROD-7210)</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Quantidade:</strong></td>
+                                <td>Solicitado: 8kg, Disponível: 5kg</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Solução:</strong></td>
+                                <td>Venda cancelada, estoque ajustado</td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="mt-2">
+                        <button class="btn btn-sm btn-outline-secondary action-btn toggle-details">
+                            <i class="fas fa-eye me-1"></i> Detalhes
+                        </button>
+                        <button class="btn btn-sm btn-outline-danger action-btn">
+                            <i class="fas fa-bug me-1"></i> Ver Erro
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Log Entry 6 -->
+                <div class="log-entry">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <span class="log-level-badge badge bg-primary">INFO</span>
+                            <span class="log-action">Backup do sistema</span>
+                            realizado por <span class="log-user">Sistema</span>
+                        </div>
+                        <div class="timestamp">29/05/2023 04:00:01</div>
+                    </div>
+                    <div class="log-details">
+                        <table class="log-details-table">
+                            <tr>
+                                <td width="120"><strong>Arquivo:</strong></td>
+                                <td>acougue_system_backup_20230529_040001.zip</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Tamanho:</strong></td>
+                                <td>48.7 MB</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Resultado:</strong></td>
+                                <td>Sucesso</td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="mt-2">
+                        <button class="btn btn-sm btn-outline-secondary action-btn toggle-details">
+                            <i class="fas fa-eye me-1"></i> Detalhes
+                        </button>
+                        <button class="btn btn-sm btn-outline-success action-btn">
+                            <i class="fas fa-download me-1"></i> Baixar Backup
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Log Entry 7 -->
+                <div class="log-entry">
+                    <div class="d-flex justify-content-between">
+                        <div>
+                            <span class="log-level-badge badge bg-primary">INFO</span>
+                            <span class="log-action">Novo usuário cadastrado</span>
+                            por <span class="log-user">João Silva</span>
+                        </div>
+                        <div class="timestamp">28/05/2023 16:20:18</div>
+                    </div>
+                    <div class="log-details">
+                        <table class="log-details-table">
+                            <tr>
+                                <td width="120"><strong>Usuário:</strong></td>
+                                <td>Carlos Souza (carlos.souza@acougue.com)</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Cargo:</strong></td>
+                                <td>Funcionário</td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="mt-2">
+                        <button class="btn btn-sm btn-outline-secondary action-btn toggle-details">
+                            <i class="fas fa-eye me-1"></i> Detalhes
+                        </button>
+                        <button class="btn btn-sm btn-outline-primary action-btn">
+                            <i class="fas fa-user me-1"></i> Ver Usuário
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-light mt-5 py-4">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-6">
+                    <h5>Sistema de Açougue</h5>
+                    <p class="text-muted">Solução completa para gestão de açougues e mercados de carne</p>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <p class="text-muted">Versão 2.1.3</p>
+                    <p class="text-muted">© 2023 Todos os direitos reservados</p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Toggle para mostrar/ocultar detalhes do log
+            const toggleButtons = document.querySelectorAll('.toggle-details');
+            toggleButtons.forEach(button => {
+                button.addEventListener('click', function() {
+                    const logEntry = this.closest('.log-entry');
+                    const details = logEntry.querySelector('.log-details');
+                    
+                    if (details.style.display === 'block') {
+                        details.style.display = 'none';
+                        this.innerHTML = '<i class="fas fa-eye me-1"></i> Detalhes';
+                    } else {
+                        details.style.display = 'block';
+                        this.innerHTML = '<i class="fas fa-eye-slash me-1"></i> Ocultar';
+                    }
+                });
+            });
+            
+            // Simulação de filtro de nível de log
+            const logEntries = document.querySelectorAll('.log-entry');
+            const levelFilter = document.querySelector('select');
+            
+            levelFilter.addEventListener('change', function() {
+                const selectedLevel = this.value.toLowerCase();
+                
+                logEntries.forEach(entry => {
+                    if (selectedLevel === 'todos os níveis') {
+                        entry.style.display = 'block';
+                    } else {
+                        const levelClass = Array.from(entry.classList).find(cls => 
+                            cls.includes('log-') && !cls.includes('entry')
+                        );
+                        
+                        if (levelClass) {
+                            const level = levelClass.replace('log-', '');
+                            entry.style.display = level === selectedLevel ? 'block' : 'none';
+                        } else {
+                            entry.style.display = selectedLevel === 'info' ? 'block' : 'none';
+                        }
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>

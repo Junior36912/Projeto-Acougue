@@ -84,6 +84,7 @@
                     <label for="cpf">CPF do Cliente</label>
                     <input type="text" id="cpf" name="cpf" class="form-control" placeholder="000.000.000-00" required>
                 </div>
+                
                 <div class="form-group">
                     <select id="metodo_pagamento" name="metodo_pagamento" class="form-control">
                         <option>Dinheiro</option>
@@ -92,6 +93,17 @@
                         <option>PIX</option>
                         <option value="pagamento_prazo">Pagamento a Prazo</option>
                     </select>
+
+                    <!-- Adicionar este campo abaixo do CPF -->
+                    <div class="form-group">
+                        <label for="data_venda">Data da Venda</label>
+                        <input type="date" 
+                            id="data_venda" 
+                            name="data_venda" 
+                            class="form-control" 
+                            value="{{ current_date }}"
+                            required>
+                    </div>
                     
                     <div class="form-group mt-2" id="fiado-due-date" style="display: none;">
                         <label for="data_vencimento">Data de Vencimento</label>
@@ -120,6 +132,8 @@
 
 {% block scripts %}
 <script>
+const dataVenda = document.getElementById('data_venda').value;
+
 const csrfToken = document.querySelector('meta[name="csrf-token"]').getAttribute('content');
 document.addEventListener('DOMContentLoaded', () => {
     const carrinho = {};
@@ -233,6 +247,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 body: JSON.stringify({
                     nome_cliente: form.nome_cliente.value,
                     cpf: form.cpf.value,
+                    data_venda: dataVenda,  // NOVO: Incluir data da venda
                     metodo_pagamento: metodoPagamento,
                     data_vencimento: dataVencimento,
                     itens: itens

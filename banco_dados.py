@@ -11,7 +11,9 @@ DB_PATH = os.environ.get('DB_PATH', 'acougue.db')
 
 @contextmanager
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
+    db_path = os.environ.get('DB_PATH', 'acougue.db')
+    # Usar URI para permitir compartilhamento em memória
+    conn = sqlite3.connect(f'file:{db_path}', uri=True)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     try:
@@ -65,7 +67,7 @@ def init_db():
                 tipo_venda TEXT NOT NULL DEFAULT 'unidade'
             )
         ''')
-        # Trigger para atualizar updated_at em produtos
+        # Within init_db() function, replace the trigger creation with:
         cursor.execute('''
             CREATE TRIGGER IF NOT EXISTS trg_update_produtos_updated_at
             AFTER UPDATE ON produtos
@@ -431,22 +433,19 @@ def delete_venda(venda_id):
         conn.commit()
 
 def processar_venda(venda_id, venda_data, usuario_id):
-    """
-    Insere venda + itens e atualiza estoque em uma transação.
-    Retorna True se OK, levanta exceção em caso de erro.
-    """
-    from datetime import datetime
+    """Insere venda + itens e atualiza estoque em uma transação."""
     with get_db_connection() as conn:
         cursor = conn.cursor()
         conn.execute('BEGIN')
-        # total deve vir calculado de fora ou recalculado aqui:
         total = sum(item['preco'] * item['quantidade'] for item in venda_data['itens'])
+        
+        # MODIFICADO: Incluir data_venda na query
         cursor.execute(
             """
             INSERT INTO vendas
             (id, cliente_cpf, cliente_nome, total, metodo_pagamento,
-             usuario_id, status_pagamento, data_vencimento, observacao)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            usuario_id, status_pagamento, data_vencimento, observacao, data)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 venda_id,
@@ -456,8 +455,9 @@ def processar_venda(venda_id, venda_data, usuario_id):
                 venda_data['metodo_pagamento'],
                 usuario_id,
                 venda_data['status_pagamento'],
-                venda_data['data_vencimento'],
-                venda_data.get('observacao')
+                venda_data.get('data_vencimento'),
+                venda_data.get('observacao'),
+                venda_data.get('data_venda', datetime.now())  # Usa data atual se não informada
             )
         )
         # itens + estoque
@@ -826,7 +826,14 @@ def fetch_vendas_prazo(cliente_filter=None, letra_filter=None):
     hoje = datetime.now().date()
     for r in rows:
         vid = r['id']
-        data = datetime.strptime(r['data'], '%Y-%m-%d %H:%M:%S') if r['data'] else None
+        # Trata datas com e sem horário
+        if r['data']:
+            try:
+                data = datetime.strptime(r['data'], '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                data = datetime.strptime(r['data'], '%Y-%m-%d')  # Formato sem horário
+        else:
+            data = None
         dv = (datetime.strptime(r['data_vencimento'], '%Y-%m-%d').date()
               if r['data_vencimento'] else None)
         vencida = (r['status_pagamento']=='pendente' and dv and dv < hoje)

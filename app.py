@@ -82,6 +82,8 @@ class Config:
     MAX_CONTENT_LENGTH = 3 * 1024 * 1024
 app.config.from_object(Config)
 
+init_db() 
+
 app.jinja_env.filters['format_datetime'] = format_datetime
 
 # Garantir caminho absoluto para upload
@@ -94,51 +96,18 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
+# Função de backup
 def backup_db():
-    """Rotina de backup do banco de dados"""
-    try:
-        # Configurar diretório de backups
-        backup_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'backups')
-        os.makedirs(backup_dir, exist_ok=True)
-        
-        # Gerar nome do arquivo com timestamp
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        backup_name = f"acougue_backup_{timestamp}.db"
-        backup_path = os.path.join(backup_dir, backup_name)
-        
-        # Usar backup via API do SQLite para maior segurança
-        src = sqlite3.connect(app.config['DATABASE'])
-        dst = sqlite3.connect(backup_path)
-        
-        with dst:
-            src.backup(dst)
-        
-        src.close()
-        dst.close()
-        
-        # Manter apenas últimos 7 backups
-        backups = sorted([f for f in os.listdir(backup_dir) if f.endswith('.db')])
-        while len(backups) > 7:
-            os.remove(os.path.join(backup_dir, backups.pop(0)))
-        
-        logging.info(f"Backup realizado: {backup_name}")
-    except Exception as e:
-        logging.error(f"Erro no backup: {str(e)}", exc_info=True)
-
-
-@app.route('/backup')
-@login_required
-@role_required('gerente')
-def download_backup():
     try:
         backup_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'backups')
         os.makedirs(backup_dir, exist_ok=True)
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        
-        # Criar backup temporário do banco
+        date_today = datetime.now().strftime('%Y%m%d')
+
+        # Backup temporário do banco
         temp_db_name = f"temp_backup_{timestamp}.db"
         temp_db_path = os.path.join(backup_dir, temp_db_name)
-        
+
         src = sqlite3.connect(app.config['DATABASE'])
         dst = sqlite3.connect(temp_db_path)
         with dst:
@@ -146,15 +115,12 @@ def download_backup():
         src.close()
         dst.close()
 
-        # Criar arquivo zip
+        # Zip com nome padronizado
         backup_name = f"acougue_system_backup_{timestamp}.zip"
         backup_path = os.path.join(backup_dir, backup_name)
-        
+
         with zipfile.ZipFile(backup_path, 'w') as zipf:
-            # Adicionar banco de dados
             zipf.write(temp_db_path, os.path.basename(temp_db_path))
-            
-            # Adicionar pasta de uploads
             uploads_path = app.config['UPLOAD_FOLDER']
             for root, dirs, files in os.walk(uploads_path):
                 for file in files:
@@ -162,28 +128,39 @@ def download_backup():
                     arcname = os.path.relpath(file_path, start=uploads_path)
                     zipf.write(file_path, os.path.join('produtos', arcname))
 
-        # Limpeza
         os.remove(temp_db_path)
-        
-        # Manter apenas últimos 7 backups
-        backups = sorted(
-            [f for f in os.listdir(backup_dir) if f.endswith('.zip')],
+
+        # Limpar backups do dia atual, mantendo só os 3 mais recentes
+        backups_today = sorted(
+            [f for f in os.listdir(backup_dir)
+             if f.startswith(f"acougue_system_backup_{date_today}") and f.endswith('.zip')],
             key=lambda x: os.path.getmtime(os.path.join(backup_dir, x)),
             reverse=True
         )
-        while len(backups) > 7:
-            old_backup = backups.pop()
-            os.remove(os.path.join(backup_dir, old_backup))
-            logging.info(f"Removendo backup antigo: {old_backup}")
 
-        return send_from_directory(backup_dir, backup_name, as_attachment=True)
+        while len(backups_today) > 3:
+            old_backup = backups_today.pop()
+            os.remove(os.path.join(backup_dir, old_backup))
+            logging.info(f"Backup antigo removido: {old_backup}")
+
+        return backup_name  # Nome do backup mais recente
 
     except Exception as e:
         logging.error(f"Erro ao gerar backup: {str(e)}", exc_info=True)
-        abort(500, description="Erro ao gerar backup do sistema")
+        return None
 
-scheduler = BackgroundScheduler(daemon=True)
-scheduler.add_job(backup_db, 'interval', hours=24)
+# Rota protegida: download do último backup
+@app.route('/backup')
+@login_required
+@role_required('gerente')
+def download_backup():
+    backup_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'backups')
+    backup_name = backup_db()  # Gera novo backup
+
+    if backup_name:
+        return send_from_directory(backup_dir, backup_name, as_attachment=True)
+    else:
+        abort(500, description="Erro ao gerar backup do sistema")
 
 
 @app.route('/')
@@ -448,11 +425,24 @@ def nova_venda():
         data = request.get_json()
         metodo_pagamento = data['metodo_pagamento']
         data_vencimento = data.get('data_vencimento')
+        data_venda = data.get('data_venda')  # NOVO CAMPO: Data da venda
+
+        # Validação da data da venda
+        if not data_venda:
+            return jsonify({'success': False, 'error': 'Data da venda obrigatória'}), 400
+
+        try:
+            data_venda = datetime.strptime(data_venda, '%Y-%m-%d').date()
+        except ValueError:
+            return jsonify({'success': False, 'error': 'Formato de data inválido (use AAAA-MM-DD)'}), 400
 
         if metodo_pagamento == 'pagamento_prazo':
             if not data_vencimento:
                 return jsonify({'success': False, 'error': 'Data de vencimento obrigatória'})
-            vencimento = datetime.strptime(data_vencimento, '%Y-%m-%d').date()
+            try:
+                vencimento = datetime.strptime(data_vencimento, '%Y-%m-%d').date()
+            except ValueError:
+                return jsonify({'success': False, 'error': 'Formato de data de vencimento inválido (use AAAA-MM-DD)'}), 400
             if vencimento < datetime.today().date():
                 return jsonify({'success': False, 'error': 'Data de vencimento inválida'})
 
@@ -461,12 +451,13 @@ def nova_venda():
         status_pagamento = 'pendente' if metodo_pagamento == 'pagamento_prazo' else 'pago'
 
         venda_data = {
-            'cliente_cpf': data.get('cpf'),
-            'cliente_nome': data.get('nome_cliente'),
-            'metodo_pagamento': data['metodo_pagamento'],
+            'data_venda': data_venda,  # NOVO: Incluir data no payload
+            'cliente_cpf': cliente_cpf,
+            'cliente_nome': cliente_nome,
+            'metodo_pagamento': metodo_pagamento,
             'itens': data['itens'],
-            'status_pagamento': 'pendente' if data['metodo_pagamento']=='pagamento_prazo' else 'pago',
-            'data_vencimento': data.get('data_vencimento'),
+            'status_pagamento': status_pagamento,
+            'data_vencimento': data_vencimento,
             'observacao': data.get('observacao')
         }
         venda_id = f"V{datetime.now():%Y%m%d%H%M%S}"
@@ -480,7 +471,7 @@ def nova_venda():
             logging.error(f"Erro ao processar venda: {e}")
             return jsonify({'success': False, 'error': 'Erro ao registrar venda'}), 500
 
-    # GET: simplesmente listar produtos via função reutilizável
+    # GET: Adicionar data atual como padrão
     produtos = listar_produtos_simples()
     current_date = datetime.now().strftime('%Y-%m-%d')
     return render_template('vendas/nova.html', produtos=produtos, current_date=current_date)
@@ -528,20 +519,27 @@ def parse_date(date_str, default):
         return default
 
 @app.route('/relatorios/<report_type>')
-@login_required
-@role_required('gerente')
+@login_required # Assuming you have this decorator
+@role_required('gerente') # Assuming you have this decorator
 def relatorios_unificados(report_type):
     report_titles = {
         'vendas_totais': 'Vendas Totais',
-        
+        'vendas_periodo': 'Vendas por Período',
+        'vendas_categorias': 'Vendas por Categoria',
+        'top_produtos': 'Top Produtos Vendidos',
+        'estoque_nivel': 'Nível de Estoque Crítico',
+        'estoque_validade': 'Produtos Próximos do Vencimento',
+        'clientes_fieis': 'Clientes Mais Fieis',
+        'fornecedores_produtos': 'Produtos por Fornecedor',
+        'movimentacao_caixa': 'Movimentação de Caixa',
+        'comparativo': 'Comparativo de Vendas'
     }
 
-    # Relatório de Vendas Totais (HTML)
-    if report_type == 'vendas_totais':
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute('''
-                SELECT 
+    # Configurations for all reports (now consolidated to be rendered as HTML)
+    reports = {
+        'vendas_totais': {
+            'query': '''
+                SELECT
                     v.id,
                     v.data,
                     v.cliente_nome as cliente,
@@ -554,17 +552,8 @@ def relatorios_unificados(report_type):
                 LEFT JOIN produtos p ON vi.produto_id = p.id
                 GROUP BY v.id
                 ORDER BY v.data DESC
-            ''')
-            dados = [dict(zip([column[0] for column in cursor.description], row)) 
-                    for row in cursor.fetchall()]
-        
-        return render_template('relatorio_unificado.html',
-                            dados=dados,
-                            report_type=report_type,
-                            titulo_relatorio=report_titles.get(report_type, 'Relatório'))
-
-    # Configurações para relatórios JSON
-    reports = {
+            '''
+        },
         'vendas_periodo': {
             'query': '''
                 SELECT DATE(v.data) as data, COUNT(*) as total_vendas,
@@ -594,14 +583,6 @@ def relatorios_unificados(report_type):
                 GROUP BY p.id ORDER BY valor_total DESC LIMIT ?
             ''',
             'params': (int(request.args.get('limit', 10)),)
-        },
-        'contas_receber': {
-            'query': '''
-                SELECT cliente_nome, total, data_vencimento,
-                CASE WHEN data_vencimento < DATE('now') THEN 'Vencido' ELSE 'A Vencer' END as status
-                FROM vendas WHERE status_pagamento = 'pendente' ORDER BY data_vencimento
-            ''',
-            'post_process': lambda data: {'contas': data, 'total_pendente': sum(item['total'] for item in data)}
         },
         'estoque_nivel': {
             'query': '''
@@ -659,25 +640,26 @@ def relatorios_unificados(report_type):
     with get_db_connection() as conn:
         cursor = conn.cursor()
         query = config['query']
-        
+
         if 'pre_process' in config:
             pre_processed = config['pre_process']()
             query = query.format(**pre_processed)
-        
+
         params = config.get('params', ())
         cursor.execute(query, params)
-        
-        dados = [dict(zip([column[0] for column in cursor.description], row)) 
-                for row in cursor.fetchall()]
-    
+
+        dados = [dict(zip([column[0] for column in cursor.description], row))
+                 for row in cursor.fetchall()]
+
     if 'post_process' in config:
         dados = config['post_process'](dados)
-    
-    return jsonify({
-        'report_type': report_type,
-        'data': dados,
-        'timestamp': datetime.now().isoformat()
-    })
+
+    # All reports now render HTML
+    return render_template('relatorio_unificado.html',
+                           dados=dados,
+                           report_type=report_type,
+                           titulo_relatorio=report_titles.get(report_type, 'Relatório'))
+
 
 
 @app.route('/relatorios/gerar_pdf', endpoint='gerar_pdf')
@@ -974,18 +956,22 @@ def verificar_validades():
         logging.error(f"Erro na verificação de validades: {str(e)}", exc_info=True)
 
 # Agendar verificação diária
+scheduler = BackgroundScheduler(daemon=True)
 scheduler.add_job(verificar_validades, 'interval', hours=24)
-
 
 if __name__ == '__main__':
     try:
+        # Scheduler: backup automático a cada 24h
+        scheduler.add_job(backup_db, 'interval', hours=24)
+        
+        # Iniciar o scheduler
         scheduler.start()
+        
         backup_db()
         verificar_validades()
         app.run(debug=True)
     except (KeyboardInterrupt, SystemExit):
         scheduler.shutdown()
-        
         
 @app.errorhandler(404)
 def page_not_found(e):

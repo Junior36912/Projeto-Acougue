@@ -1,0 +1,386 @@
+{% extends 'base.html' %}
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ titulo_relatorio }} - Relatórios</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+        .container {
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 {
+            color: #0056b3;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .report-header {
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        .report-header h2 {
+            color: #333;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 10px;
+            text-align: left;
+        }
+        th {
+            background-color: #0056b3;
+            color: white;
+            position: sticky;
+            top: 0;
+        }
+        tr:nth-child(even) {
+            background-color: #f2f2f2;
+        }
+        .no-data {
+            text-align: center;
+            padding: 20px;
+            color: #777;
+        }
+        .back-link {
+            display: block;
+            margin-top: 30px;
+            text-align: center;
+            text-decoration: none;
+            color: #0056b3;
+            font-weight: bold;
+        }
+        .summary-box {
+            background-color: #e9f7ef;
+            border: 1px solid #c3e6cb;
+            padding: 15px;
+            margin-top: 20px;
+            border-radius: 5px;
+            text-align: center;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Relatórios Gerenciais</h1>
+       
+        <div class="report-header">
+            <h2>{{ titulo_relatorio }}</h2>
+        </div>
+
+        {% if report_type == 'contas_receber' %}
+            {% if dados and dados.contas %} {# Check if dados and dados.contas exist and are not empty #}
+                <div class="summary-box">
+                    Total Pendente: R$ {{ "%.2f"|format(dados.total_pendente|float) }}
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Cliente</th>
+                            <th>Total</th>
+                            <th>Data Vencimento</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in dados.contas %}
+                        <tr>
+                            <td>{{ item.cliente_nome }}</td>
+                            <td>R$ {{ "%.2f"|format(item.total|float) }}</td>
+                            <td>{{ item.data_vencimento }}</td>
+                            <td>{{ item.status }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="no-data">Nenhum dado encontrado para este relatório de Contas a Receber.</p>
+            {% endif %}
+        {% elif report_type == 'vendas_totais' %}
+            {% if dados %} {# Check if dados is not empty #}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>ID da Venda</th>
+                            <th>Data</th>
+                            <th>Cliente</th>
+                            <th>Produtos</th>
+                            <th>Total</th>
+                            <th>Método Pagamento</th>
+                            <th>Total Itens</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for venda in dados %}
+                        <tr>
+                            <td>{{ venda.id }}</td>
+                            <td>{{ venda.data }}</td>
+                            <td>{{ venda.cliente }}</td>
+                            <td>{{ venda.produtos }}</td>
+                            <td>R$ {{ "%.2f"|format(venda.total|float) }}</td>
+                            <td>{{ venda.metodo_pagamento }}</td>
+                            <td>{{ venda.total_itens }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="no-data">Nenhum dado encontrado para este relatório de Vendas Totais.</p>
+            {% endif %}
+        {% elif report_type == 'vendas_periodo' %}
+            {% if dados %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Data</th>
+                            <th>Total Vendas</th>
+                            <th>Valor Total</th>
+                            <th>Ticket Médio</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in dados %}
+                        <tr>
+                            <td>{{ item.data }}</td>
+                            <td>{{ item.total_vendas }}</td>
+                            <td>R$ {{ "%.2f"|format(item.valor_total|float) }}</td>
+                            <td>R$ {{ "%.2f"|format(item.ticket_medio|float) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="no-data">Nenhum dado encontrado para este relatório de Vendas por Período.</p>
+            {% endif %}
+        {% elif report_type == 'vendas_categorias' %}
+            {% if dados %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Categoria</th>
+                            <th>Quantidade Vendida</th>
+                            <th>Valor Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in dados %}
+                        <tr>
+                            <td>{{ item.categoria }}</td>
+                            <td>{{ item.quantidade_vendida }}</td>
+                            <td>R$ {{ "%.2f"|format(item.valor_total|float) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="no-data">Nenhum dado encontrado para este relatório de Vendas por Categoria.</p>
+            {% endif %}
+        {% elif report_type == 'top_produtos' %}
+            {% if dados %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Produto</th>
+                            <th>Quantidade Vendida</th>
+                            <th>Valor Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in dados %}
+                        <tr>
+                            <td>{{ item.nome }}</td>
+                            <td>{{ item.quantidade_vendida }}</td>
+                            <td>R$ {{ "%.2f"|format(item.valor_total|float) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="no-data">Nenhum dado encontrado para este relatório de Top Produtos Vendidos.</p>
+            {% endif %}
+        {% elif report_type == 'estoque_nivel' %}
+            {% if dados %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Produto</th>
+                            <th>Quantidade Atual</th>
+                            <th>Estoque Mínimo</th>
+                            <th>Diferença</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in dados %}
+                        <tr>
+                            <td>{{ item.nome }}</td>
+                            <td>{{ item.quantidade }}</td>
+                            <td>{{ item.estoque_minimo }}</td>
+                            <td>{{ item.diferenca }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="no-data">Nenhum dado encontrado para este relatório de Nível de Estoque Crítico.</p>
+            {% endif %}
+        {% elif report_type == 'estoque_validade' %}
+            {% if dados %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Produto</th>
+                            <th>Data Validade</th>
+                            <th>Dias Restantes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in dados %}
+                        <tr>
+                            <td>{{ item.nome }}</td>
+                            <td>{{ item.data_validade }}</td>
+                            <td>{{ item.dias_restantes|int }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="no-data">Nenhum dado encontrado para este relatório de Produtos Próximos do Vencimento.</p>
+            {% endif %}
+        {% elif report_type == 'clientes_fieis' %}
+            {% if dados %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Cliente</th>
+                            <th>Total Compras</th>
+                            <th>Valor Total Gasto</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in dados %}
+                        <tr>
+                            <td>{{ item.cliente_nome }}</td>
+                            <td>{{ item.total_compras }}</td>
+                            <td>R$ {{ "%.2f"|format(item.valor_total_gasto|float) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="no-data">Nenhum dado encontrado para este relatório de Clientes Mais Fieis.</p>
+            {% endif %}
+        {% elif report_type == 'fornecedores_produtos' %}
+            {% if dados %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Fornecedor</th>
+                            <th>Total Produtos</th>
+                            <th>Total Estoque</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in dados %}
+                        <tr>
+                            <td>{{ item.fornecedor }}</td>
+                            <td>{{ item.total_produtos }}</td>
+                            <td>{{ item.total_estoque }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="no-data">Nenhum dado encontrado para este relatório de Produtos por Fornecedor.</p>
+            {% endif %}
+        {% elif report_type == 'movimentacao_caixa' %}
+            {% if dados %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Data</th>
+                            <th>Entradas (R$)</th>
+                            <th>Saídas (Fiado R$)</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in dados %}
+                        <tr>
+                            <td>{{ item.data }}</td>
+                            <td>R$ {{ "%.2f"|format(item.entradas|float) }}</td>
+                            <td>R$ {{ "%.2f"|format(item.saidas|float) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="no-data">Nenhum dado encontrado para este relatório de Movimentação de Caixa.</p>
+            {% endif %}
+        {% elif report_type == 'comparativo' %}
+            {% if dados %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Período</th>
+                            <th>Total Vendas</th>
+                            <th>Valor Total</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for item in dados %}
+                        <tr>
+                            <td>{{ item.periodo }}</td>
+                            <td>{{ item.total_vendas }}</td>
+                            <td>R$ {{ "%.2f"|format(item.valor_total|float) }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                <p class="no-data">Nenhum dado encontrado para este relatório Comparativo de Vendas.</p>
+            {% endif %}
+        {% else %} {# This block is for unrecognized report types or generic display #}
+            <p class="no-data">Tipo de relatório não reconhecido ou sem layout específico.</p>
+            {# This is the general table rendering for reports that don't have a dedicated block #}
+            {% if dados is sequence and dados|length > 0 and dados[0] is mapping %}
+                <table>
+                    <thead>
+                        <tr>
+                            {% for key in dados[0].keys() %}
+                                <th>{{ key|replace('_', ' ')|title }}</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in dados %}
+                        <tr>
+                            {% for value in row.values() %}
+                                <td>{{ value }}</td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% else %}
+                {# This will catch cases where `dados` is empty, or not a list of dictionaries, or not a sequence at all #}
+                <p class="no-data">Este relatório não possui um formato tabular padrão ou está vazio.</p>
+            {% endif %}
+        {% endif %}
+
+        <a href="/" class="back-link">Voltar para a página inicial</a>
+    </div>
+</body>
+</html>
