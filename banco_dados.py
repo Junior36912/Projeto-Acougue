@@ -106,6 +106,20 @@ def init_db():
             )
         ''')
         conn.commit()
+        
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                user_id INTEGER,
+                action TEXT NOT NULL,
+                level TEXT NOT NULL,
+                details TEXT,
+                ip_address TEXT,
+                user_agent TEXT
+            )
+        ''')
+        conn.commit()
 
 
 
@@ -861,3 +875,47 @@ def marcar_venda_pago(venda_id):
 def adicionar_observacao_venda(venda_id, observacao):
     """Adiciona ou atualiza observação de uma venda."""
     return update_venda(venda_id, observacao=observacao)
+
+# Adicione esta função no banco_dados.py
+def listar_logs(page=1, per_page=20, search=None, level=None, user_id=None, action=None, start_date=None, end_date=None):
+    offset = (page - 1) * per_page
+    query = "SELECT * FROM logs WHERE 1=1"
+    params = []
+
+    if search:
+        query += " AND (action LIKE ? OR details LIKE ?)"
+        params.extend([f'%{search}%', f'%{search}%'])
+    if level:
+        query += " AND level = ?"
+        params.append(level)
+    if user_id:
+        query += " AND user_id = ?"
+        params.append(user_id)
+    if action:
+        query += " AND action = ?"
+        params.append(action)
+    if start_date:
+        query += " AND DATE(timestamp) >= ?"
+        params.append(start_date)
+    if end_date:
+        query += " AND DATE(timestamp) <= ?"
+        params.append(end_date)
+
+    query += " ORDER BY timestamp DESC LIMIT ? OFFSET ?"
+    params.extend([per_page, offset])
+
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        logs = [dict(row) for row in cursor.fetchall()]
+
+        # Contar total de registros
+        count_query = "SELECT COUNT(*) as total FROM logs WHERE 1=1"
+        count_params = params[:-2]  # Remove LIMIT e OFFSET
+        if count_params:
+            cursor.execute(count_query, count_params)
+        else:
+            cursor.execute(count_query)
+        total = cursor.fetchone()['total']
+
+        return logs, total

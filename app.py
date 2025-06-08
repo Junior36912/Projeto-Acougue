@@ -46,7 +46,8 @@ from banco_dados import (
     atualizar_produto,
     excluir_produto,
     get_categorias,
-    get_produto_by_id
+    get_produto_by_id,
+    listar_logs
 )
 from decorators import login_required, role_required
 from gerador_pdf import gerar_relatorio_pdf
@@ -909,7 +910,49 @@ def adicionar_observacao_venda_prazo(venda_id):
 
 
 # Utilitários
-
+@app.route('/logs')
+@login_required
+@role_required('gerente')
+def visualizar_logs():
+    page = request.args.get('page', 1, type=int)
+    per_page = 20
+    search = request.args.get('search', '')
+    level = request.args.get('level', '')
+    user_id = request.args.get('user_id', '')
+    action = request.args.get('action', '')
+    start_date = request.args.get('start_date', '')
+    end_date = request.args.get('end_date', '')
+    
+    logs, total = listar_logs(
+        page=page,
+        per_page=per_page,
+        search=search,
+        level=level,
+        user_id=user_id,
+        action=action,
+        start_date=start_date,
+        end_date=end_date
+    )
+    
+    total_pages = (total + per_page - 1) // per_page
+    
+    # Obter nomes de usuários para o filtro
+    with get_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, username FROM users")
+        usuarios = {row['id']: row['username'] for row in cursor.fetchall()}
+    
+    return render_template('logs.html', 
+                           logs=logs, 
+                           page=page,
+                           total_pages=total_pages,
+                           search=search,
+                           level=level,
+                           user_id=user_id,
+                           action=action,
+                           start_date=start_date,
+                           end_date=end_date,
+                           usuarios=usuarios)
 
 @app.template_filter('format_currency')
 def format_currency(value):
