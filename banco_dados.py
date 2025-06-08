@@ -602,36 +602,44 @@ def inserir_produto(form: dict, foto):
         'tipo_venda': form.get('tipo_venda'),
         'foto': None
     }
-
-    # Processar upload de imagem
-    saved_filename = None
-    if foto and foto.filename:
-        filename = secure_filename(f"{datetime.now().timestamp()}_{foto.filename}")
-        upload_folder = current_app.config['UPLOAD_FOLDER']
-        os.makedirs(upload_folder, exist_ok=True)
-        path = os.path.join(upload_folder, filename)
-        foto.save(path)
-        saved_filename = filename
-        produto_data['foto'] = filename
-
-    # Inserir no banco
+    
+    conn = None
+    cursor = None
     try:
-        with get_db_connection() as conn:
+        with get_db_connection() as conn:  # Properly use the context manager
             cursor = conn.cursor()
-            cols = [k for k in produto_data.keys()]
-            placeholders = ','.join(['?'] * len(cols))
-            sql = f"INSERT INTO produtos ({','.join(cols)}) VALUES ({placeholders})"
-            cursor.execute(sql, [produto_data[k] for k in cols])
+            
+            # Query de inserção (SQLite usa ? como placeholder, não %s)
+            query = """
+            INSERT INTO produtos (
+                nome, descricao, categoria, preco, quantidade, estoque_minimo,
+                codigo_barras, fornecedor_id, data_validade, tipo_venda, foto
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+            
+            valores = (
+                produto_data['nome'],
+                produto_data['descricao'],
+                produto_data['categoria'],
+                produto_data['preco'],
+                produto_data['quantidade'],
+                produto_data['estoque_minimo'],
+                produto_data['codigo_barras'],
+                produto_data['fornecedor_id'],
+                produto_data['data_validade'],
+                produto_data['tipo_venda'],
+                produto_data['foto']
+            )
+            
+            cursor.execute(query, valores)
             conn.commit()
+            
+            produto_id = cursor.lastrowid
+            return produto_id
+            
     except Exception as e:
-        # remover imagem salva em caso de erro
-        if saved_filename:
-            try:
-                os.remove(os.path.join(current_app.config['UPLOAD_FOLDER'], saved_filename))
-            except Exception as rm_err:
-                logging.error(f"Falha ao remover arquivo: {rm_err}")
-        raise
-
+        logging.error(f"Erro ao inserir produto no banco de dados: {str(e)}")
+        raise ValueError("Erro ao salvar produto no banco de dados")
 
 def atualizar_produto(produto_id: int, form: dict, foto):
     # Buscar existente

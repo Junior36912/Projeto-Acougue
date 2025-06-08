@@ -1,6 +1,8 @@
 import logging
 from datetime import datetime
 from flask import request
+import json
+from banco_dados import get_db_connection
 
 # Atualize a função registrar_log
 def registrar_log(user_id, action, level='INFO', details=None, request=None):

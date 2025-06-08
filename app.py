@@ -76,7 +76,7 @@ def format_datetime(value, format='%d/%m/%Y %H:%M'):
 app = Flask(__name__)
 class Config:
     SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-key-123'
-    UPLOAD_FOLDER = 'static/uploads/produtos'
+    UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads', 'produtos')
     DATABASE = 'acougue.db'
     ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png'}
     MAX_FILE_SIZE_MB = 2

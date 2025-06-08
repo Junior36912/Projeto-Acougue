@@ -82,7 +82,7 @@
                 </div>
                 <div class="form-group">
                     <label for="cpf">CPF do Cliente</label>
-                    <input type="text" id="cpf" name="cpf" class="form-control" placeholder="000.000.000-00" required>
+                    <input type="text" id="cpf" name="cpf" class="form-control" placeholder="000.000.000-00">
                 </div>
                 
                 <div class="form-group">
@@ -173,8 +173,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Adicionar produtos
-    // Adicionar produtos
     document.querySelectorAll('.btn-adicionar').forEach(btn => {
         btn.addEventListener('click', () => {
             const row = btn.closest('.produto-item');
