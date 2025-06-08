@@ -187,7 +187,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (!preco || preco <= 0) return alert('Informe o preço por quilo!');
                 if (!quantidade || quantidade <= 0) return alert('Informe o peso!');
             } else {
-                preco = parseFloat(row.children[1].textContent.replace('R$ ', ''));
+                preco = parseFloat(row.children[2].textContent.replace('R$ ', ''));
                 quantidade = parseInt(row.querySelector('.quantidade-input').value);
             }
             const id = row.dataset.id;
