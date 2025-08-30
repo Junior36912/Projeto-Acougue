@@ -139,13 +139,13 @@ Editar a função relatorios_unificados em app.py
 
 ### 🔒 Segurança
 
-Senhas com hash seguro (Werkzeug)
+- Senhas com hash seguro (Werkzeug)
 
-Proteção CSRF (Flask-WTF)
+- Proteção CSRF (Flask-WTF)
 
-Controle de acesso por roles (gerente/funcionário)
+- Controle de acesso por roles (gerente/funcionário)
 
-Logs detalhados de atividades
+- Logs detalhados de atividades
 
 ## 📜 Licença
 
