@@ -1,9 +1,6 @@
 import sqlite3
 import os
 from contextlib import contextmanager
-from werkzeug.security import generate_password_hash
-from werkzeug.utils import secure_filename
-from flask import current_app
 from datetime import datetime
 import logging
 

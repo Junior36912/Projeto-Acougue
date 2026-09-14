@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# Node
+node_modules/
+
+# Ambientes virtuais
+venv/
+.venv/
+
+# Bancos de dados locais / instancia
+instance/
+*.db-journal
+
+# Backups locais
+backups/
+
+# IDE
+.vscode/
+.idea/
