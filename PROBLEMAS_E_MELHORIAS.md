@@ -17,6 +17,7 @@ quem for corrigir algo marca o item aqui.
 - Ao corrigir: troque `- [ ]` por `- [x]` e anote o commit, ex.: `- [x] **BUG-01** ... ✅ corrigido em abc1234`.
 - Se um item deixar de fazer sentido, marque `- [~]` e explique em uma linha.
 - Registre cada nova revisão no **Histórico** no fim do arquivo.
+- Para corrigir, siga o **Plano de lotes**: um lote por sessão, com o modelo indicado.
 
 **Severidade:** 🔴 Crítico (quebra função essencial, perda de dados ou falha de segurança grave) ·
 🟠 Alto · 🟡 Médio · 🔵 Baixo / melhoria
@@ -54,15 +55,34 @@ Corrigidos por severidade: 🔴 12 de 12 · 🟠 30 de 32 · 🟡 16 de 42 · �
 9. **PERF-03 / DB-06** — o alerta de validade grava um log por produto por dia, e a tabela `logs` cresce sem limite.
 10. **DB-03** — o SQLite roda sem WAL e sem tempo de espera, o que pode dar "database is locked" com o scheduler rodando junto.
 
-### Ordem sugerida de correção
+### Plano de lotes (com modelo e sessão recomendados)
 
-1. ~~**Críticos**~~ ✅ feito em 26/09/2026.
-2. ~~**Lote 2** (fiado, formas de pagamento, caixa, git, categorias, permissões, relatórios, decimais, mensagens, CSS, backup)~~ ✅ feito em 26/09/2026.
-3. ~~**Lote 3** (datas e fuso, fornecedores, edição de produto, colunas dos relatórios, login, SQL dinâmico, dependências, miniaturas, índices, duplicatas)~~ ✅ feito em 26/09/2026.
-4. **Dados e segurança:** DB-01, NEG-08, SEC-07, DB-05, DB-03, SEC-09, SEC-10.
-5. **Operação:** INF-03, INF-04, PERF-03, DB-06, REL-04, UI-06.
-6. **Repositório:** INF-02 (com decisão do usuário), INF-05, INF-06, DB-07, TEST-06.
-7. **Estrutura e acabamento:** CODE-02, CODE-05 a CODE-10, UI-02, UI-03, REL-05, REL-06 e o restante.
+Os pendentes estão divididos em **lotes pequenos**. Cada lote cabe numa sessão e tem uma frase pronta para pedir ao Claude.
+
+**Regras gerais:**
+- **Uma sessão nova do Claude por lote** (`/clear` ou uma conversa nova). Sessões longas acumulam contexto, e cada nova mensagem fica mais cara. Este arquivo e as memórias salvas mantêm a continuidade entre sessões.
+- **Troque o modelo com `/model`** antes de começar, conforme a coluna "Modelo".
+  - **Haiku 4.5:** tarefas mecânicas e textos (o mais barato).
+  - **Sonnet 5:** a maioria das correções com teste (o melhor custo-benefício neste projeto).
+  - **Opus 5.5:** só quando o lote mexe em dados reais, reescreve histórico ou reestrutura o código inteiro.
+- Ao terminar um lote, marque-o como feito aqui e no item correspondente.
+
+| Lote | Itens | Modelo | Sessão | Pedido sugerido |
+|---|---|---|---|---|
+| ~~1–3~~ | ~~Críticos e altos~~ | Opus 5.5 | — | ✅ feito em 26/09/2026 (commit `bbfe4db`) |
+| 4 | DB-01, NEG-08, SEC-07 | Sonnet 5 | Nova | "Corrija DB-01, NEG-08 e SEC-07 do PROBLEMAS_E_MELHORIAS.md, com testes" |
+| 5 | DB-05, DB-03, DB-04 | Sonnet 5 | Nova | "Corrija DB-05, DB-03 e DB-04, com testes e migração com backup" |
+| 6 | SEC-09, SEC-10, CODE-07, BUG-22, BUG-23 | Sonnet 5 | Nova | "Corrija SEC-09, SEC-10, CODE-07, BUG-22 e BUG-23, com testes" |
+| 7 | INF-04, PERF-03, DB-06 | Sonnet 5 | Nova | "Corrija INF-04, PERF-03 e DB-06 (logs), com testes" |
+| 8 | REL-04, UI-06, PERF-06 | Sonnet 5 | Nova | "Adicione paginação: REL-04, UI-06 e PERF-06, com testes" |
+| 9 | PERF-02, PERF-04, PERF-05, INF-03 | Sonnet 5 | Nova | "Corrija PERF-02, PERF-04, PERF-05 e INF-03, com testes" |
+| 10 | NEG-09, SEC-12, TEST-05 | Sonnet 5 | Nova | "Corrija NEG-09, SEC-12 e TEST-05, com testes" |
+| 11 | REL-05, REL-06, UI-02, UI-03, UI-05, UI-07, UI-08, UI-09 | Sonnet 5 | Nova | "Corrija o acabamento de relatórios e interface (REL-05, REL-06, UI-02…UI-09), com testes e capturas de tela" |
+| 12 | INF-05, INF-06, DB-07, DB-08, TEST-06, CODE-08, CODE-09 | Haiku 4.5 | Nova | "Faça a limpeza: INF-05, INF-06, DB-07, DB-08, TEST-06, CODE-08 e CODE-09" |
+| 13 | CODE-02, CODE-05, CODE-06, CODE-10 | **Opus 5.5** | **Nova, exclusiva** | "Reestruture o app em blueprints (CODE-05) e unifique CODE-02/06/10, sem mudar comportamento; todos os testes devem continuar passando" |
+| 14 | INF-02 (+ resto do SEC-05) | **Opus 5.5** | **Nova, exclusiva** | Só com decisão sua: "Limpe o histórico do git (INF-02); faça backup do repositório antes" |
+
+**Por que os lotes 13 e 14 pedem sessão exclusiva com Opus:** o 13 mexe em quase todos os arquivos, e o 14 reescreve o histórico do git e exige push forçado, o que não tem volta. Nos dois, um erro custa caro, e vale gastar mais para acertar de primeira.
 
 ---
 
