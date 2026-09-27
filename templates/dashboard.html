@@ -48,7 +48,7 @@
                     <td>{{ venda.data|format_datetime('%H:%M') }}</td>
                     <td>{{ venda.cliente }}</td>
                     <td>{{ venda.total|format_currency }}</td>
-                    <td>{{ venda.metodo_pagamento }}</td>
+                    <td>{{ venda.metodo_pagamento|forma_pagamento }}</td>
                     {% if is_gerente %}
                     <td>{{ venda.status_pagamento|capitalize }}</td>
                     {% endif %}
@@ -73,8 +73,8 @@
                 {% for produto in alertas_estoque %}
                 <tr>
                     <td>{{ produto.nome }}</td>
-                    <td>{{ produto.quantidade }}</td>
-                    <td>{{ produto.estoque_minimo }}</td>
+                    <td>{{ produto.quantidade|format_quantidade }}</td>
+                    <td>{{ produto.estoque_minimo|format_quantidade }}</td>
                 </tr>
                 {% else %}
                 <tr>
@@ -100,7 +100,7 @@
             <tbody>
                 {% for metodo in metodos_pagamento %}
                 <tr>
-                    <td>{{ metodo.metodo_pagamento }}</td>
+                    <td>{{ metodo.metodo_pagamento|forma_pagamento }}</td>
                     <td>{{ metodo.quantidade }}</td>
                     <td>{{ metodo.valor_total|format_currency }}</td>
                 </tr>
@@ -122,7 +122,7 @@
                 {% for produto in top_produtos %}
                 <tr>
                     <td>{{ produto.nome }}</td>
-                    <td>{{ produto.quantidade_vendida }}</td>
+                    <td>{{ produto.quantidade_vendida|format_quantidade }}</td>
                 </tr>
                 {% else %}
                 <tr>

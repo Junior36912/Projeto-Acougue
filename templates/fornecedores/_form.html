@@ -1,0 +1,48 @@
+{# Campos do fornecedor, usados no cadastro e na edição #}
+{% set f = form_data or fornecedor or {} %}
+<div class="form-group">
+    <label for="nome">Nome do Fornecedor *</label>
+    <input type="text" class="form-control" id="nome" name="nome" value="{{ f.nome or '' }}" required>
+</div>
+
+<div class="form-row">
+    <div class="form-group">
+        <label for="cnpj">CNPJ *</label>
+        <input type="text" class="form-control cnpj-mask" id="cnpj" name="cnpj" inputmode="numeric"
+               placeholder="00.000.000/0000-00" value="{{ f.cnpj or '' }}" required>
+    </div>
+    <div class="form-group">
+        <label for="contato">Contato (telefone ou e-mail) *</label>
+        <input type="text" class="form-control phone-mask" id="contato" name="contato"
+               value="{{ f.contato or '' }}" required>
+    </div>
+</div>
+
+<div class="form-group">
+    <label for="endereco">Endereço</label>
+    <textarea class="form-control" id="endereco" name="endereco" rows="3">{{ f.endereco or '' }}</textarea>
+</div>
+
+<script>
+    // Máscara de CNPJ enquanto digita
+    document.getElementById('cnpj').addEventListener('input', function(e) {
+        let value = e.target.value.replace(/\D/g, '').slice(0, 14);
+        value = value.replace(/^(\d{2})(\d)/, '$1.$2')
+                     .replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3')
+                     .replace(/\.(\d{3})(\d)/, '.$1/$2')
+                     .replace(/(\d{4})(\d)/, '$1-$2');
+        e.target.value = value;
+    });
+
+    // Máscara de telefone, só quando o contato é um número (e-mails ficam como digitados)
+    document.getElementById('contato').addEventListener('input', function(e) {
+        if (/[^\d\s()\-+]/.test(e.target.value)) return;
+        let value = e.target.value.replace(/\D/g, '').slice(0, 11);
+        if (value.length <= 10) {
+            value = value.replace(/(\d{2})(\d)/, '($1) $2').replace(/(\d{4})(\d)/, '$1-$2');
+        } else {
+            value = value.replace(/(\d{2})(\d)/, '($1) $2').replace(/(\d{5})(\d)/, '$1-$2');
+        }
+        e.target.value = value;
+    });
+</script>

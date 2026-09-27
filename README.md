@@ -50,7 +50,7 @@ Projeto-Acougue/
 ⚙️ Instalação e Configuração
 ✅ Pré-requisitos
 
-Python 3.8+
+Python 3.11+ (testado no 3.12)
 
 pip (gerenciador de pacotes do Python)
 
@@ -85,6 +85,8 @@ python app.py
 
 Acesse em: http://localhost:5000
 
+O modo debug fica desligado por padrão. Para desenvolver com recarga automática e debugger, use `FLASK_DEBUG=1 python app.py` (nunca em produção: o debugger permite executar código pelo navegador).
+
 ## 💻 Uso
 ### 🔐 Acesso Inicial
 
@@ -92,7 +94,9 @@ URL: http://localhost:5000
 
 Usuário: admin
 
-Senha: admin123 (após popular o banco)
+Senha: admin123 (após rodar `python popular_banco.py`)
+
+No primeiro acesso com a senha padrão, o sistema exige que você cadastre uma senha nova. Cada usuário pode trocar a própria senha pelo link **Senha** no menu.
 
 ## 📌 Funcionalidades Principais
 
@@ -110,21 +114,29 @@ Senha: admin123 (após popular o banco)
 
 ## 💾 Backup
 
-- Backups automáticos a cada 24h
- 
-- Disponíveis em /backup (apenas para gerentes)
+- Com o sistema rodando (`python app.py`), o backup é feito quando o último tem mais de 24h, e não a cada reinício.
+- Ficam em `backups/`: `acougue_banco_*.zip` (banco comprimido) e `acougue_fotos_*.zip` (fotos, criado só quando alguma foto muda).
+- Retenção automática: o último backup de cada um dos 7 dias mais recentes, o de cada uma das 4 semanas mais recentes e os 2 últimos de fotos. Os arquivos `acougue_system_backup_*.zip` de versões antigas não são apagados automaticamente.
+- O gerente baixa um backup completo (banco + fotos) em `/backup` ("Backup Completo" no dashboard). Ele é gerado na hora e não fica guardado.
+- Antes de migrar o esquema do banco, o sistema salva uma cópia em `backups/acougue_pre_migracao_v<versão>_<data>.db`.
 
 ## 🧪 Testes
 
-Rodar todos os testes automatizados:
+Instalar as dependências de teste e rodar a suíte:
 ```
+pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
+Os testes usam bancos e pastas temporários: não alteram o `acougue.db` nem a pasta `backups/`.
 ⚙️ Personalização
 Configurações em app.py
 
 ```
-SECRET_KEY → chave secreta da aplicação
+SECRET_KEY → chave secreta da aplicação (variável de ambiente; se não existir,
+             uma chave aleatória é gerada e guardada em instance/secret_key)
+DB_PATH → caminho do banco SQLite (padrão: acougue.db)
+FLASK_DEBUG → 1 liga o modo debug (padrão: desligado)
+FLASK_RUN_HOST / FLASK_RUN_PORT → endereço e porta (padrão: 127.0.0.1:5000)
 
 UPLOAD_FOLDER → pasta de upload de imagens
 
@@ -139,7 +151,8 @@ Editar a função relatorios_unificados em app.py
 
 ### 🔒 Segurança
 
-- Senhas com hash seguro (Werkzeug)
+- Senhas com hash seguro (Werkzeug), troca obrigatória da senha padrão
+- Banco de dados fora do git (`*.db` no `.gitignore`)
 
 - Proteção CSRF (Flask-WTF)
 

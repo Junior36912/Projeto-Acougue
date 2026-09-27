@@ -2,46 +2,39 @@
 
 {% block title %}Novo Produto{% endblock %}
 
-{% block head %}
-<style>
-    /* Você pode adicionar estilos customizados aqui */
-</style>
-{% endblock %}
-
 {% block content %}
+{% set f = form_data or {} %}
 <div class="container mt-4">
     <h1 class="mb-4">Cadastrar Novo Produto</h1>
+
+    {% if error %}
+        <div class="alert alert-danger" role="alert">{{ error }}</div>
+    {% endif %}
 
     <form method="POST" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
         <!-- Nome -->
         <div class="form-group mb-3">
             <label for="nome">Nome:</label>
-            <input type="text" class="form-control" id="nome" name="nome" required>
+            <input type="text" class="form-control" id="nome" name="nome" value="{{ f.get('nome', '') }}" required>
         </div>
 
         <!-- Descrição -->
         <div class="form-group mb-3">
             <label for="descricao">Descrição:</label>
-            <textarea class="form-control" id="descricao" name="descricao" rows="3"></textarea>
+            <textarea class="form-control" id="descricao" name="descricao" rows="3">{{ f.get('descricao', '') }}</textarea>
         </div>
 
-        <!-- Categoria -->
+        <!-- Categoria: escolha uma existente ou digite uma nova -->
         <div class="form-group mb-3">
             <label for="categoria">Categoria:</label>
-            <input type="text" class="form-control" id="categoria" name="categoria" required>
-        </div>
-
-        <!-- Preço -->
-        <div class="form-group mb-3">
-            <label for="preco">Preço (R$):</label>
-            <input type="number" class="form-control" id="preco" name="preco" step="0.01" min="0" required>
-        </div>
-
-        <!-- Quantidade -->
-        <div class="form-group mb-3">
-            <label for="quantidade">Quantidade:</label>
-            <input type="number" class="form-control" id="quantidade" name="quantidade" min="0" required>
+            <input type="text" class="form-control" id="categoria" name="categoria" list="lista-categorias"
+                   value="{{ f.get('categoria', '') }}" autocomplete="off" required>
+            <datalist id="lista-categorias">
+                {% for categoria in categorias %}
+                <option value="{{ categoria }}">
+                {% endfor %}
+            </datalist>
         </div>
 
         <!-- Tipo de Venda -->
@@ -49,21 +42,36 @@
             <label for="tipo_venda">Tipo de Venda:</label>
             <select class="form-control" id="tipo_venda" name="tipo_venda" required>
                 <option value="">Selecione o tipo</option>
-                <option value="unidade" {% if request.form.get('tipo_venda') == 'unidade' %}selected{% endif %}>Unidade</option>
-                <option value="quilo" {% if request.form.get('tipo_venda') == 'quilo' %}selected{% endif %}>Quilo</option>
+                <option value="unidade" {% if f.get('tipo_venda') == 'unidade' %}selected{% endif %}>Unidade</option>
+                <option value="quilo" {% if f.get('tipo_venda') == 'quilo' %}selected{% endif %}>Quilo</option>
             </select>
+        </div>
+
+        <!-- Preço -->
+        <div class="form-group mb-3">
+            <label for="preco">Preço (R$, por kg nos produtos vendidos por quilo):</label>
+            <input type="number" class="form-control" id="preco" name="preco" step="0.01" min="0.01"
+                   value="{{ f.get('preco', '') }}" required>
+        </div>
+
+        <!-- Quantidade -->
+        <div class="form-group mb-3">
+            <label for="quantidade">Quantidade em estoque:</label>
+            <input type="number" class="form-control" id="quantidade" name="quantidade" min="0" step="0.001"
+                   value="{{ f.get('quantidade', '') }}" required>
         </div>
 
         <!-- Estoque Mínimo -->
         <div class="form-group mb-3">
             <label for="estoque_minimo">Estoque Mínimo:</label>
-            <input type="number" class="form-control" id="estoque_minimo" name="estoque_minimo" min="0">
+            <input type="number" class="form-control" id="estoque_minimo" name="estoque_minimo" min="0" step="0.001"
+                   value="{{ f.get('estoque_minimo', '') }}">
         </div>
 
         <!-- Código de Barras -->
         <div class="form-group mb-3">
             <label for="codigo_barras">Código de Barras:</label>
-            <input type="text" class="form-control" id="codigo_barras" name="codigo_barras">
+            <input type="text" class="form-control" id="codigo_barras" name="codigo_barras" value="{{ f.get('codigo_barras', '') }}">
         </div>
 
         <!-- Fornecedor -->
@@ -72,7 +80,7 @@
             <select class="form-control" id="fornecedor_id" name="fornecedor_id">
                 <option value="">Selecione um fornecedor</option>
                 {% for fornecedor in fornecedores %}
-                    <option value="{{ fornecedor.id }}">{{ fornecedor.nome }}</option>
+                    <option value="{{ fornecedor.id }}" {% if f.get('fornecedor_id') == fornecedor.id|string %}selected{% endif %}>{{ fornecedor.nome }}</option>
                 {% endfor %}
             </select>
         </div>
@@ -80,22 +88,21 @@
         <!-- Data de Validade -->
         <div class="form-group mb-3">
             <label for="data_validade">Data de Validade:</label>
-            <input type="date" class="form-control" id="data_validade" name="data_validade">
+            <input type="date" class="form-control" id="data_validade" name="data_validade" value="{{ f.get('data_validade', '') }}">
         </div>
 
         <!-- Foto -->
         <div class="form-group mb-4">
-            <label for="foto">Foto do Produto:</label>
-            <input type="file" class="form-control" id="foto" name="foto" accept="image/*">
+            <label for="foto">Foto do Produto (JPG ou PNG, até 2 MB):</label>
+            <input type="file" class="form-control" id="foto" name="foto" accept=".jpg,.jpeg,.png">
         </div>
 
         <!-- Botão de Envio -->
         <button type="submit" class="btn btn-primary">Cadastrar Produto</button>
-
-        <!-- Mensagem de Erro -->
-        {% if error %}
-            <div class="alert alert-danger mt-3">{{ error }}</div>
-        {% endif %}
     </form>
 </div>
+{% endblock %}
+
+{% block scripts %}
+{% include 'produtos/_passo_quantidade.html' %}
 {% endblock %}

@@ -1,0 +1,14 @@
+<script>
+// Produtos por quilo aceitam gramas (0,001 kg); por unidade, só números inteiros
+document.addEventListener('DOMContentLoaded', () => {
+    const tipo = document.getElementById('tipo_venda');
+    const ajustarPasso = () => {
+        const passo = tipo.value === 'unidade' ? '1' : '0.001';
+        ['quantidade', 'estoque_minimo'].forEach(id => {
+            document.getElementById(id).step = passo;
+        });
+    };
+    tipo.addEventListener('change', ajustarPasso);
+    ajustarPasso();
+});
+</script>

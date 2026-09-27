@@ -113,12 +113,9 @@ def popular_dados_teste():
         ]
 
         for produto in produtos:
+            # foto guarda só o nome do arquivo; os templates prefixam uploads/produtos/
             nome, categoria, preco, quantidade, tipo_venda, estoque_minimo, fornecedor_id, foto = produto
-            if foto:
-                foto = f'uploads/produtos/{foto}'
-            else:
-                foto = None  # Garante NULL explícito para imagens faltantes
-            
+
             cursor.execute('''
                 INSERT INTO produtos (
                     nome, categoria, preco, quantidade, tipo_venda,

@@ -1,6 +1,5 @@
 import logging
 from datetime import datetime
-from flask import request
 import json
 from banco_dados import get_db_connection
 
@@ -14,10 +13,14 @@ def registrar_log(user_id, action, level='INFO', details=None, request=None):
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO logs (user_id, action, level, details, ip_address, user_agent)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO logs (timestamp, user_id, action, level, details, ip_address, user_agent)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (user_id, action, level, json.dumps(details) if details else None, ip_address, user_agent)
+            # Hora local (o CURRENT_TIMESTAMP do SQLite é UTC).
+            # ensure_ascii=False: grava "Coração" legível, para a busca nos logs encontrar
+            (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), user_id, action, level,
+             json.dumps(details, ensure_ascii=False) if details else None,
+             ip_address, user_agent)
         )
         conn.commit()
     

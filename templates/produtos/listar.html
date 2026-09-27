@@ -4,11 +4,6 @@
 
 {% block content %}
 <div class="dashboard-container">
-    {% if request.args.get('error') %}
-        <div class="alert alert-danger">
-            {{ request.args.get('error') }}
-        </div>
-    {% endif %}
     <div class="filters card" style="margin-bottom: 1.5rem;">
         <form method="GET" style="display: flex; flex-wrap: wrap; gap: 1rem; align-items: center;">
             <input class="form-control" type="text" name="search" placeholder="Buscar por nome ou código" value="{{ request.args.get('search', '') }}">
@@ -60,9 +55,10 @@
                 <tr>
                     <td>
                         {% if p.foto %}
-                            <img src="{{ url_for('static', filename=p.foto) }}"
+                            <img src="{{ url_for('static', filename=p.foto|miniatura) }}"
                                  alt="{{ p.nome }}"
                                  class="img-thumbnail"
+                                 loading="lazy"
                                  style="max-width: 100px;">
                         {% else %}
                             Sem foto

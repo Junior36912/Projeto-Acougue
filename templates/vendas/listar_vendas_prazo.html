@@ -13,7 +13,6 @@
         </div>
     </div>
 
-    {% include 'flash_messages.html' %}
 
     <!-- Filtro Alfabético  e com nome-->
     <div class="card mb-4 shadow-sm">
@@ -69,7 +68,7 @@
                                     {{ venda.data.strftime('%d/%m/%Y') if venda.data else '-' }}
                                 </div>
                                 <small class="text-muted">
-                                    {{ venda.data.strftime('%H:%M') if venda.data else '' }}
+                                    {{ venda.data.strftime('%H:%M') if venda.data and venda.tem_hora else '' }}
                                 </small>
                             </td>
                             <td>
@@ -79,7 +78,7 @@
                                     <div class="d-flex justify-content-between">
                                         <span class="text-truncate" style="max-width: 120px">{{ item.nome }}</span>
                                         <span class="badge bg-light text-dark">
-                                            {{ item.quantidade }}x {{ item.preco_unitario|format_currency }}
+                                            {{ item.quantidade|format_quantidade }}x {{ item.preco_unitario|format_currency }}
                                         </span>
                                     </div>
                                     {% endfor %}
@@ -95,7 +94,7 @@
                                 <div class="d-flex align-items-center gap-1">
                                     {{ venda.data_vencimento.strftime('%d/%m/%Y') if venda.data_vencimento else '-' }}
                                     {% if venda.vencida %}
-                                    <i class="bi bi-exclamation-triangle-fill text-danger"></i>
+                                    <i class="fas fa-exclamation-triangle text-danger" title="Vencida"></i>
                                     {% endif %}
                                 </div>
                             </td>
@@ -115,7 +114,7 @@
                                                   style="min-height: 60px">{{ venda.observacao or '' }}</textarea>
                                     </div>
                                     <button type="submit" class="btn btn-sm btn-primary mt-1 w-100">
-                                        <i class="bi bi-save me-1"></i>Salvar
+                                        <i class="fas fa-save me-1"></i>Salvar
                                     </button>
                                 </form>
                             </td>
@@ -124,7 +123,7 @@
                                 <form method="POST" action="{{ url_for('pagar_venda_prazo', venda_id=venda.id) }}">
                                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
                                     <button type="submit" class="btn btn-sm btn-success w-100">
-                                        <i class="bi bi-check2-circle me-1"></i>Pagar
+                                        <i class="fas fa-check-circle me-1"></i>Pagar
                                     </button>
                                 </form>
                                 {% else %}
@@ -136,7 +135,7 @@
                         <tr>
                             <td colspan="8" class="text-center py-4">
                                 <div class="text-muted fst-italic">
-                                    <i class="bi bi-database-exclamation me-2"></i>
+                                    <i class="fas fa-inbox me-2"></i>
                                     Nenhuma venda encontrada
                                 </div>
                             </td>

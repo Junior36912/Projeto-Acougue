@@ -1,0 +1,4 @@
+# Para rodar os testes: pip install -r requirements-dev.txt && pytest tests/
+-r requirements.txt
+pytest==8.3.5
+pyflakes==4.0.0

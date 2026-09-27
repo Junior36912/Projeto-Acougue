@@ -1,20 +1,21 @@
+import hashlib
 import json
 import logging
 import os
-import shutil
+import re
+import secrets
 import sqlite3
+import tempfile
+import uuid
 import zipfile
-from collections import defaultdict
 from datetime import datetime, timedelta
-from functools import wraps
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from flask import (
     Flask, jsonify, render_template, request, redirect, url_for,
-    send_from_directory, session, abort, send_file  
+    session, abort, send_file, flash
 )
-from werkzeug.security import check_password_hash, generate_password_hash
-from werkzeug.utils import secure_filename
+from werkzeug.security import check_password_hash
 
 from app_logging import registrar_log
 from banco_dados import (
@@ -25,8 +26,6 @@ from banco_dados import (
     listar_produtos_simples,
     get_all_users,
     get_all_produtos,
-    get_all_vendas,
-    get_venda_items,
     init_db,
     get_db_connection,
     get_user_by_id,
@@ -38,19 +37,26 @@ from banco_dados import (
     get_fornecedor_by_id,
     update_fornecedor,
     delete_fornecedor,
-    get_user_by_username,
     update_user,
-    get_all_fornecedores,
     listar_produtos as db_listar_produtos,
     inserir_produto,
     atualizar_produto,
     excluir_produto,
     get_categorias,
     get_produto_by_id,
-    listar_logs
+    listar_logs,
+    contar_logs_por_nivel,
+    listar_acoes_logs,
+    FORMAS_PAGAMENTO,
+    normalizar_forma_pagamento,
+    ler_data_hora,
+    registrar_falha_login,
+    tempo_bloqueio_login,
+    limpar_falhas_login
 )
+from imagens import caminho_miniatura, gerar_miniaturas_faltantes, PASTA_MINIATURAS
 from decorators import login_required, role_required
-from gerador_pdf import gerar_relatorio_pdf
+from gerador_pdf import gerar_relatorio_pdf, SQL_MOVIMENTACAO_CAIXA
 
 from flask_wtf.csrf import CSRFProtect
 
@@ -59,28 +65,57 @@ logging.basicConfig(level=logging.INFO)
 
 
 def format_datetime(value, format='%d/%m/%Y %H:%M'):
-    if value is None:
+    """Formata datas gravadas com ou sem hora (e com microssegundos).
+    Quando o valor não tem hora, a parte de hora do formato é omitida."""
+    if value is None or value == '':
         return ''
-    if isinstance(value, str):
-        # Se for string, converte para datetime primeiro
-        try:
-            value = datetime.strptime(value, '%Y-%m-%d %H:%M:%S')
-        except ValueError:
-            try:
-                value = datetime.strptime(value, '%Y-%m-%d')
-            except ValueError:
-                return value
-    return value.strftime(format)
+    momento, tem_hora = ler_data_hora(value)
+    if momento is None:
+        return value
+    if not tem_hora:
+        format = re.sub(r'\s*%H:%M(:%S)?', '', format).strip()
+        if not format:
+            return '—'
+    return momento.strftime(format)
+
+
+def carregar_secret_key(pasta_instancia):
+    """SECRET_KEY do ambiente ou, na falta dela, uma chave aleatória gerada uma
+    única vez e guardada em instance/secret_key (pasta fora do git).
+    Nunca usa uma chave fixa no código: com ela, qualquer um forjaria a sessão."""
+    chave = os.environ.get('SECRET_KEY')
+    if chave:
+        return chave
+    caminho = os.path.join(pasta_instancia, 'secret_key')
+    try:
+        with open(caminho) as arquivo:
+            chave = arquivo.read().strip()
+        if chave:
+            return chave
+    except FileNotFoundError:
+        pass
+    os.makedirs(pasta_instancia, exist_ok=True)
+    chave = secrets.token_hex(32)
+    descritor = os.open(caminho, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descritor, 'w') as arquivo:
+        arquivo.write(chave)
+    return chave
 
 
 app = Flask(__name__)
 class Config:
-    SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-key-123'
+    SECRET_KEY = carregar_secret_key(app.instance_path)
     UPLOAD_FOLDER = os.path.join(app.root_path, 'static', 'uploads', 'produtos')
+    BACKUP_FOLDER = os.path.join(app.root_path, 'backups')
     DATABASE = 'acougue.db'
     ALLOWED_EXTENSIONS = {'jpg', 'jpeg', 'png'}
     MAX_FILE_SIZE_MB = 2
     MAX_CONTENT_LENGTH = 3 * 1024 * 1024
+    # Sessão expira em 12h mesmo com o navegador aberto; o cookie não vai em
+    # requisições disparadas por outros sites
+    PERMANENT_SESSION_LIFETIME = timedelta(hours=12)
+    SESSION_COOKIE_SAMESITE = 'Lax'
+    SESSION_COOKIE_HTTPONLY = True
 app.config.from_object(Config)
 
 init_db() 
@@ -97,71 +132,162 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
 
-# Função de backup
+# ---------------------------------------------------------------
+# Backup
+# ---------------------------------------------------------------
+# O banco (pequeno) vai para um zip comprimido a cada backup; as fotos (~19 MB,
+# já comprimidas) só ganham um zip novo quando alguma foto muda.
+PREFIXO_BACKUP_BANCO = 'acougue_banco_'
+PREFIXO_BACKUP_FOTOS = 'acougue_fotos_'
+RETENCAO_RECENTES = timedelta(hours=24)  # tudo das últimas 24h
+RETENCAO_DIAS = 7       # último backup de cada um dos 7 dias mais recentes
+RETENCAO_SEMANAS = 4    # e de cada uma das 4 semanas mais recentes
+RETENCAO_FOTOS = 2      # últimos backups de fotos
+INTERVALO_BACKUP = timedelta(hours=24)
+
+
+def _nome_backup(prefixo):
+    # Microssegundos: dois backups no mesmo segundo não se sobrescrevem
+    return f"{prefixo}{datetime.now():%Y%m%d_%H%M%S_%f}.zip"
+
+
+def _backups(prefixo):
+    """Backups com o prefixo, do mais novo para o mais antigo (o nome tem a data)."""
+    pasta = app.config['BACKUP_FOLDER']
+    if not os.path.isdir(pasta):
+        return []
+    return sorted((nome for nome in os.listdir(pasta)
+                   if nome.startswith(prefixo) and nome.endswith('.zip')), reverse=True)
+
+
+def _data_do_backup(nome):
+    carimbo = nome.rsplit('_', 3)[-3:]
+    return datetime.strptime('_'.join(carimbo)[:-len('.zip')], '%Y%m%d_%H%M%S_%f')
+
+
+def _adicionar_banco(zipf):
+    """Cópia consistente do banco (API de backup do SQLite), mesmo com o sistema em uso."""
+    with tempfile.TemporaryDirectory() as pasta_temporaria:
+        copia = os.path.join(pasta_temporaria, 'acougue.db')
+        destino = sqlite3.connect(copia)
+        try:
+            with get_db_connection() as conn:
+                conn.backup(destino)
+        finally:
+            destino.close()
+        zipf.write(copia, 'acougue.db', compress_type=zipfile.ZIP_DEFLATED)
+
+
+def _arquivos_de_fotos():
+    pasta = app.config['UPLOAD_FOLDER']
+    for raiz, subpastas, arquivos in os.walk(pasta):
+        # Miniaturas não entram: são recriadas a partir das fotos (ver imagens.py)
+        subpastas[:] = sorted(d for d in subpastas if d != PASTA_MINIATURAS)
+        for nome in sorted(arquivos):
+            caminho = os.path.join(raiz, nome)
+            yield caminho, os.path.join('produtos', os.path.relpath(caminho, pasta))
+
+
+def _assinatura_fotos():
+    """Muda quando alguma foto é adicionada, removida ou trocada."""
+    partes = []
+    for caminho, nome_no_zip in _arquivos_de_fotos():
+        info = os.stat(caminho)
+        partes.append(f'{nome_no_zip}|{info.st_size}|{int(info.st_mtime)}')
+    return hashlib.sha256('\n'.join(partes).encode()).hexdigest()
+
+
+def _adicionar_fotos(zipf):
+    for caminho, nome_no_zip in _arquivos_de_fotos():
+        zipf.write(caminho, nome_no_zip, compress_type=zipfile.ZIP_STORED)
+
+
+def aplicar_retencao(agora=None):
+    """Apaga backups antigos do formato atual. Os arquivos acougue_system_backup_*
+    das versões anteriores não são tocados."""
+    agora = agora or datetime.now()
+    pasta = app.config['BACKUP_FOLDER']
+    manter = set(_backups(PREFIXO_BACKUP_FOTOS)[:RETENCAO_FOTOS])
+    dias, semanas = set(), set()
+    for nome in _backups(PREFIXO_BACKUP_BANCO):
+        momento = _data_do_backup(nome)
+        if momento >= agora - RETENCAO_RECENTES:
+            manter.add(nome)
+        if momento.date() not in dias and len(dias) < RETENCAO_DIAS:
+            dias.add(momento.date())
+            manter.add(nome)
+        semana = momento.isocalendar()[:2]
+        if semana not in semanas and len(semanas) < RETENCAO_SEMANAS:
+            semanas.add(semana)
+            manter.add(nome)
+    for nome in _backups(PREFIXO_BACKUP_BANCO) + _backups(PREFIXO_BACKUP_FOTOS):
+        if nome not in manter:
+            os.remove(os.path.join(pasta, nome))
+            logging.info(f"Backup antigo removido: {nome}")
+
+
 def backup_db():
+    """Backup do banco e, se alguma foto mudou desde o último, das fotos.
+    Retorna a lista de arquivos criados, ou None em caso de erro."""
     try:
-        backup_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'backups')
-        os.makedirs(backup_dir, exist_ok=True)
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        date_today = datetime.now().strftime('%Y%m%d')
+        pasta = app.config['BACKUP_FOLDER']
+        os.makedirs(pasta, exist_ok=True)
+        criados = []
 
-        # Backup temporário do banco
-        temp_db_name = f"temp_backup_{timestamp}.db"
-        temp_db_path = os.path.join(backup_dir, temp_db_name)
+        nome = _nome_backup(PREFIXO_BACKUP_BANCO)
+        with zipfile.ZipFile(os.path.join(pasta, nome), 'w') as zipf:
+            _adicionar_banco(zipf)
+        criados.append(nome)
 
-        src = sqlite3.connect(app.config['DATABASE'])
-        dst = sqlite3.connect(temp_db_path)
-        with dst:
-            src.backup(dst)
-        src.close()
-        dst.close()
+        assinatura = _assinatura_fotos()
+        ultimo_fotos = _backups(PREFIXO_BACKUP_FOTOS)[:1]
+        assinatura_anterior = None
+        if ultimo_fotos:
+            with zipfile.ZipFile(os.path.join(pasta, ultimo_fotos[0])) as zipf:
+                assinatura_anterior = zipf.comment.decode()
+        if assinatura != assinatura_anterior:
+            nome = _nome_backup(PREFIXO_BACKUP_FOTOS)
+            with zipfile.ZipFile(os.path.join(pasta, nome), 'w') as zipf:
+                _adicionar_fotos(zipf)
+                zipf.comment = assinatura.encode()
+            criados.append(nome)
 
-        # Zip com nome padronizado
-        backup_name = f"acougue_system_backup_{timestamp}.zip"
-        backup_path = os.path.join(backup_dir, backup_name)
-
-        with zipfile.ZipFile(backup_path, 'w') as zipf:
-            zipf.write(temp_db_path, os.path.basename(temp_db_path))
-            uploads_path = app.config['UPLOAD_FOLDER']
-            for root, dirs, files in os.walk(uploads_path):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    arcname = os.path.relpath(file_path, start=uploads_path)
-                    zipf.write(file_path, os.path.join('produtos', arcname))
-
-        os.remove(temp_db_path)
-
-        # Limpar backups do dia atual, mantendo só os 3 mais recentes
-        backups_today = sorted(
-            [f for f in os.listdir(backup_dir)
-             if f.startswith(f"acougue_system_backup_{date_today}") and f.endswith('.zip')],
-            key=lambda x: os.path.getmtime(os.path.join(backup_dir, x)),
-            reverse=True
-        )
-
-        while len(backups_today) > 3:
-            old_backup = backups_today.pop()
-            os.remove(os.path.join(backup_dir, old_backup))
-            logging.info(f"Backup antigo removido: {old_backup}")
-
-        return backup_name  # Nome do backup mais recente
+        aplicar_retencao()
+        return criados
 
     except Exception as e:
         logging.error(f"Erro ao gerar backup: {str(e)}", exc_info=True)
         return None
 
-# Rota protegida: download do último backup
+
+def backup_se_necessario():
+    """Faz backup só se o último backup do banco tiver mais de 24h
+    (evita um backup a cada reinício do sistema)."""
+    ultimo = _backups(PREFIXO_BACKUP_BANCO)[:1]
+    if ultimo and datetime.now() - _data_do_backup(ultimo[0]) < INTERVALO_BACKUP:
+        return None
+    return backup_db()
+
+
+# Rota protegida: download de um backup completo (banco + fotos), gerado na hora
+# e entregue sem ficar guardado na pasta de backups
 @app.route('/backup')
 @login_required
 @role_required('gerente')
 def download_backup():
-    backup_dir = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'backups')
-    backup_name = backup_db()  # Gera novo backup
-
-    if backup_name:
-        return send_from_directory(backup_dir, backup_name, as_attachment=True)
-    else:
+    arquivo = tempfile.TemporaryFile()
+    try:
+        with zipfile.ZipFile(arquivo, 'w') as zipf:
+            _adicionar_banco(zipf)
+            _adicionar_fotos(zipf)
+    except Exception as e:
+        arquivo.close()
+        logging.error(f"Erro ao gerar backup para download: {e}", exc_info=True)
         abort(500, description="Erro ao gerar backup do sistema")
+    arquivo.seek(0)
+    registrar_log(session['user_id'], 'download_backup', 'INFO', request=request)
+    return send_file(arquivo, as_attachment=True, mimetype='application/zip',
+                     download_name=f"acougue_backup_completo_{datetime.now():%Y%m%d_%H%M%S}.zip")
 
 
 @app.route('/')
@@ -173,33 +299,106 @@ def index():
 
 # Sistema de Autenticação
 
+# Senha documentada no README e criada pelo popular_banco.py
+SENHA_PADRAO = 'admin123'
+ENDPOINTS_LIVRES = {'static', 'login', 'logout', 'trocar_senha'}
+
+
+@app.before_request
+def carregar_usuario_da_sessao():
+    """Relê o usuário do banco a cada requisição: quem foi desativado perde o
+    acesso na hora e mudanças de cargo valem sem precisar sair e entrar."""
+    user_id = session.get('user_id')
+    if user_id is None or request.endpoint == 'static':
+        return None
+    with get_db_connection() as conn:
+        usuario = conn.execute(
+            'SELECT username, role, ativo FROM users WHERE id = ?', (user_id,)).fetchone()
+    if usuario is None or not usuario['ativo']:
+        session.clear()
+        flash('Sua sessão foi encerrada. Entre novamente.', 'error')
+        return redirect(url_for('login'))
+    session['role'] = usuario['role']
+    session['username'] = usuario['username']
+    if session.get('trocar_senha') and request.endpoint not in ENDPOINTS_LIVRES:
+        flash('Troque a senha padrão antes de continuar.', 'error')
+        return redirect(url_for('trocar_senha'))
+    return None
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-        
+        username = request.form.get('username', '').strip()
+        password = request.form.get('password', '')
+        ip = request.remote_addr
+
+        espera = tempo_bloqueio_login(username, ip)
+        if espera:
+            minutos = max(1, -(-int(espera.total_seconds()) // 60))
+            registrar_log(None, 'login_bloqueado', 'WARNING', {'username': username}, request=request)
+            return render_template(
+                'login.html',
+                error=f'Muitas tentativas erradas. Tente novamente em {minutos} minuto(s).'), 429
+
         with get_db_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('SELECT * FROM users WHERE username = ?', (username,))
+            cursor.execute('SELECT * FROM users WHERE username = ? AND ativo = 1', (username,))
             user = cursor.fetchone()
 
-            if user and check_password_hash(user[3], password):
-                session['user_id'] = user[0]
-                session['username'] = user[1]
-                session['role'] = user[4]
+            if user and check_password_hash(user['password_hash'], password):
+                limpar_falhas_login(username)
+                session.clear()
+                session.permanent = True
+                session['user_id'] = user['id']
+                session['username'] = user['username']
+                session['role'] = user['role']
                 registrar_log(
-                    user[0],
+                    user['id'],
                     'login',
                     'INFO',
                     {'result': 'success'},
                     request=request
                 )
+                if password == SENHA_PADRAO:
+                    session['trocar_senha'] = True
+                    flash('Você entrou com a senha padrão. Cadastre uma senha nova.', 'error')
+                    return redirect(url_for('trocar_senha'))
                 return redirect(url_for('index'))
             else:
+                registrar_falha_login(username, ip)
+                registrar_log(None, 'login_falha', 'WARNING', {'username': username}, request=request)
                 return render_template('login.html', error='Credenciais inválidas')
     
     return render_template('login.html')
+
+@app.route('/conta/senha', methods=['GET', 'POST'])
+@login_required
+def trocar_senha():
+    if request.method == 'POST':
+        atual = request.form.get('senha_atual', '')
+        nova = request.form.get('nova_senha', '')
+        confirmacao = request.form.get('confirmacao', '')
+        usuario = get_user_by_id(session['user_id'])
+
+        erro = None
+        if not check_password_hash(usuario['password_hash'], atual):
+            erro = 'Senha atual incorreta.'
+        elif len(nova) < 6:
+            erro = 'A nova senha deve ter pelo menos 6 caracteres.'
+        elif nova == SENHA_PADRAO or nova == atual:
+            erro = 'Escolha uma senha diferente da atual e da senha padrão.'
+        elif nova != confirmacao:
+            erro = 'A confirmação não confere com a nova senha.'
+        if erro:
+            return render_template('conta/senha.html', error=erro)
+
+        update_user(session['user_id'], password=nova)
+        session.pop('trocar_senha', None)
+        registrar_log(session['user_id'], 'trocar_senha', 'INFO', request=request)
+        flash('Senha alterada com sucesso.', 'success')
+        return redirect(url_for('index'))
+    return render_template('conta/senha.html')
+
 
 @app.route('/logout')
 def logout():
@@ -234,111 +433,91 @@ def listar_produtos():
                          search=search,
                          categoria=categoria)
 
+def _erro_na_foto(foto):
+    """Mensagem de erro se a foto enviada for inválida; None se estiver ok ou não houver foto."""
+    if not foto or foto.filename == '':
+        return None
+    if not allowed_file(foto.filename):
+        return "Apenas arquivos JPG, JPEG e PNG são permitidos!"
+    foto.stream.seek(0, os.SEEK_END)
+    tamanho = foto.stream.tell()
+    foto.stream.seek(0)
+    if tamanho > app.config['MAX_FILE_SIZE_MB'] * 1024 * 1024:
+        return f"Arquivo muito grande! Tamanho máximo: {app.config['MAX_FILE_SIZE_MB']}MB"
+    return None
+
+
+def _formulario_produto(template, **contexto):
+    """Renderiza o cadastro/edição com as listas de fornecedores e categorias."""
+    return render_template(template, fornecedores=get_fornecedores(),
+                           categorias=get_categorias(), **contexto)
+
+
 @app.route('/produtos/novo', methods=['GET', 'POST'])
 @login_required
 @role_required('gerente')
 def novo_produto():
     if request.method == 'POST':
+        foto = request.files.get('foto')
+        erro = _erro_na_foto(foto)
+        if erro:
+            return _formulario_produto('produtos/novo.html', error=erro, form_data=request.form)
         try:
-            form_data = request.form
-            foto = request.files.get('foto')
-            
-            if foto and foto.filename != '':
-                # Verificar extensão
-                if not allowed_file(foto.filename):
-                    error_message = "Apenas arquivos JPG, JPEG e PNG são permitidos!"
-                    return render_template('produtos/novo.html',
-                                        error=error_message,
-                                        fornecedores=get_fornecedores(),
-                                        form_data=form_data)
-                
-                # Verificar tamanho
-                foto.stream.seek(0, os.SEEK_END)
-                file_size = foto.stream.tell()
-                foto.stream.seek(0)  # Resetar posição do arquivo
-                
-                if file_size > app.config['MAX_FILE_SIZE_MB'] * 1024 * 1024:
-                    error_message = f"Arquivo muito grande! Tamanho máximo: {app.config['MAX_FILE_SIZE_MB']}MB"
-                    return render_template('produtos/novo.html',
-                                        error=error_message,
-                                        fornecedores=get_fornecedores(),
-                                        form_data=form_data)
-        
-            # Chama a função do banco_dados.py
-            inserir_produto(form_data, foto)
-            return redirect(url_for('listar_produtos'))
-
+            inserir_produto(request.form, foto)
+        except ValueError as e:
+            return _formulario_produto('produtos/novo.html', error=str(e), form_data=request.form)
         except Exception as e:
-            logging.error(f"Erro ao cadastrar produto: {str(e)}", exc_info=True)  
-            error_message = str(e) if app.debug else "Erro ao cadastrar produto. Verifique os dados."
-            return render_template('produtos/novo.html',
-                                error=error_message,
-                                fornecedores=get_fornecedores(),
-                                form_data=request.form)
+            logging.error(f"Erro ao cadastrar produto: {str(e)}", exc_info=True)
+            return _formulario_produto('produtos/novo.html',
+                                       error="Erro ao cadastrar produto. Verifique os dados.",
+                                       form_data=request.form)
+        flash(f'Produto "{request.form.get("nome", "").strip()}" cadastrado.', 'success')
+        return redirect(url_for('listar_produtos'))
 
-    return render_template('produtos/novo.html',
-                         fornecedores=get_fornecedores())
+    return _formulario_produto('produtos/novo.html')
 
 @app.route('/produtos/editar/<int:id>', methods=['GET', 'POST'])
 @login_required
 @role_required('gerente')
 def editar_produto(id):
     produto = get_produto_by_id(id)
-    if not produto:
+    if not produto or not produto['ativo']:
         abort(404)
 
     if request.method == 'POST':
+        foto = request.files.get('foto')
+        erro = _erro_na_foto(foto)
+        if erro:
+            return _formulario_produto('produtos/editar.html', produto=produto, error=erro)
         try:
-            form_data = request.form
-            foto = request.files.get('foto')
-            
-            if foto and foto.filename != '':
-                # Verificar extensão
-                if not allowed_file(foto.filename):
-                    error_message = "Apenas arquivos JPG, JPEG e PNG são permitidos!"
-                    return render_template('produtos/novo.html',
-                                        error=error_message,
-                                        fornecedores=get_fornecedores(),
-                                        form_data=form_data)
-                
-                # Verificar tamanho
-                foto.stream.seek(0, os.SEEK_END)
-                file_size = foto.stream.tell()
-                foto.stream.seek(0)  
-                
-                if file_size > app.config['MAX_FILE_SIZE_MB'] * 1024 * 1024:
-                    error_message = f"Arquivo muito grande! Tamanho máximo: {app.config['MAX_FILE_SIZE_MB']}MB"
-                    return render_template('produtos/novo.html',
-                                        error=error_message,
-                                        fornecedores=get_fornecedores(),
-                                        form_data=form_data)
-
-            atualizar_produto(id, form_data, foto)
-            return redirect(url_for('listar_produtos'))
-
+            atualizar_produto(id, request.form, foto)
+        except ValueError as e:
+            return _formulario_produto('produtos/editar.html', produto=produto, error=str(e))
         except Exception as e:
-            logging.error(f"Erro ao atualizar produto: {str(e)}")
-            return render_template('produtos/editar.html',
-                                produto=produto,
-                                fornecedores=get_fornecedores(),
-                                error=str(e))
+            logging.error(f"Erro ao atualizar produto: {str(e)}", exc_info=True)
+            return _formulario_produto('produtos/editar.html', produto=produto,
+                                       error="Erro ao atualizar produto. Verifique os dados.")
+        flash(f'Produto "{produto["nome"]}" atualizado.', 'success')
+        return redirect(url_for('listar_produtos'))
 
-    return render_template('produtos/editar.html',
-                         produto=produto,
-                         fornecedores=get_fornecedores())
+    return _formulario_produto('produtos/editar.html', produto=produto)
 
 @app.route('/produtos/excluir/<int:id>', methods=['POST'])
 @login_required
 @role_required('gerente')
 def excluir_produto_route(id):
     try:
-        excluir_produto(id)
-        return redirect(url_for('listar_produtos'))
+        if excluir_produto(id) == 'desativado':
+            flash('O produto já tem vendas registradas, então foi desativado '
+                  '(o histórico de vendas foi mantido).', 'success')
+        else:
+            flash('Produto excluído.', 'success')
     except ValueError as ve:
-        return redirect(url_for('listar_produtos', error=str(ve)))
+        flash(str(ve), 'error')
     except Exception as e:
         logging.error(f"Erro ao excluir produto: {str(e)}", exc_info=True)
-        return redirect(url_for('listar_produtos', error="Erro interno ao excluir produto"))
+        flash('Erro interno ao excluir produto.', 'error')
+    return redirect(url_for('listar_produtos'))
 # ---------------------------------------------------------------
 # Gestão de Fornecedores
 # ---------------------------------------------------------------
@@ -354,19 +533,53 @@ def listar_fornecedores():
 
 
 
+def validar_cnpj(cnpj):
+    """True se o CNPJ tem 14 dígitos e os dois dígitos verificadores conferem."""
+    digitos = re.sub(r'\D', '', cnpj or '')
+    if len(digitos) != 14 or digitos == digitos[0] * 14:
+        return False
+
+    def digito_verificador(base):
+        pesos = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2][-len(base):]
+        resto = sum(int(n) * p for n, p in zip(base, pesos)) % 11
+        return '0' if resto < 2 else str(11 - resto)
+
+    return (digitos[12] == digito_verificador(digitos[:12])
+            and digitos[13] == digito_verificador(digitos[:13]))
+
+
+def formatar_cnpj(cnpj):
+    digitos = re.sub(r'\D', '', cnpj or '')
+    if len(digitos) != 14:
+        return (cnpj or '').strip()
+    return f'{digitos[:2]}.{digitos[2:5]}.{digitos[5:8]}/{digitos[8:12]}-{digitos[12:]}'
+
+
+def _dados_fornecedor(form, cnpj_atual=None):
+    """Valida e padroniza o formulário de fornecedor. Um CNPJ já cadastrado e
+    não alterado é aceito mesmo sem dígitos válidos (cadastros anteriores à validação)."""
+    dados = {
+        'nome': form.get('nome', '').strip(),
+        'cnpj': formatar_cnpj(form.get('cnpj', '')),
+        'contato': form.get('contato', '').strip(),
+        'endereco': form.get('endereco', '').strip() or None,
+    }
+    if not dados['nome'] or not dados['contato']:
+        raise ValueError('Nome e contato são obrigatórios.')
+    if dados['cnpj'] != cnpj_atual and not validar_cnpj(dados['cnpj']):
+        raise ValueError('CNPJ inválido: confira os 14 dígitos.')
+    return dados
+
+
 @app.route('/fornecedores/novo', methods=['GET', 'POST'])
 @login_required
 @role_required('gerente')
 def novo_fornecedor():
     if request.method == 'POST':
-        dados = {
-            'nome': request.form['nome'],
-            'cnpj': request.form['cnpj'],
-            'contato': request.form['contato'],
-            'endereco': request.form.get('endereco', '')
-        }
         try:
+            dados = _dados_fornecedor(request.form)
             create_fornecedor(**dados)
+            flash(f'Fornecedor "{dados["nome"]}" cadastrado.', 'success')
             return redirect(url_for('listar_fornecedores'))
         except ValueError as e:
             # Exibe o erro e mantém os dados do formulário
@@ -384,14 +597,10 @@ def editar_fornecedor(id):
     if not fornecedor:
         abort(404)
     if request.method == 'POST':
-        dados = {
-            'nome': request.form['nome'],
-            'cnpj': request.form['cnpj'],
-            'contato': request.form['contato'],
-            'endereco': request.form.get('endereco', '')
-        }
         try:
+            dados = _dados_fornecedor(request.form, cnpj_atual=fornecedor['cnpj'])
             update_fornecedor(id, **dados)
+            flash(f'Fornecedor "{dados["nome"]}" atualizado.', 'success')
             return redirect(url_for('listar_fornecedores'))
         except ValueError as e:
             # Passar form_data para manter dados submetidos
@@ -406,12 +615,24 @@ def editar_fornecedor(id):
 @login_required
 @role_required('gerente')
 def excluir_fornecedor(id):
-    try:
-        delete_fornecedor(id)
+    fornecedor = get_fornecedor_by_id(id)
+    if not fornecedor:
+        flash('Fornecedor não encontrado.', 'error')
         return redirect(url_for('listar_fornecedores'))
-    except Exception:
-        # tratando IntegrityError em delete
-        return redirect(url_for('listar_fornecedores', error='Não é possível excluir fornecedor com produtos vinculados'))
+    try:
+        with get_db_connection() as conn:
+            vinculados = conn.execute(
+                'SELECT COUNT(*) FROM produtos WHERE fornecedor_id = ?', (id,)).fetchone()[0]
+        delete_fornecedor(id)
+    except Exception as e:
+        logging.error(f"Erro ao excluir fornecedor: {e}", exc_info=True)
+        flash('Erro ao excluir fornecedor.', 'error')
+        return redirect(url_for('listar_fornecedores'))
+    mensagem = f'Fornecedor "{fornecedor["nome"]}" excluído.'
+    if vinculados:
+        mensagem += f' {vinculados} produto(s) ficaram sem fornecedor.'
+    flash(mensagem, 'success')
+    return redirect(url_for('listar_fornecedores'))
 
 # Gestão de Vendas
 
@@ -423,45 +644,55 @@ def nova_venda():
         if not user_id:
             return jsonify({'success': False, 'error': 'Usuário não autenticado'}), 401
 
-        data = request.get_json()
-        metodo_pagamento = data['metodo_pagamento']
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({'success': False, 'error': 'Dados da venda inválidos'}), 400
+        if not data.get('metodo_pagamento'):
+            return jsonify({'success': False, 'error': 'Informe a forma de pagamento'}), 400
+        metodo_pagamento = normalizar_forma_pagamento(data.get('metodo_pagamento'))
+        if metodo_pagamento is None:
+            return jsonify({'success': False, 'error': 'Forma de pagamento inválida'}), 400
         data_vencimento = data.get('data_vencimento')
-        data_venda = data.get('data_venda')  # NOVO CAMPO: Data da venda
+        data_venda = data.get('data_venda')
 
         # Validação da data da venda
         if not data_venda:
             return jsonify({'success': False, 'error': 'Data da venda obrigatória'}), 400
 
         try:
-            data_venda = datetime.strptime(data_venda, '%Y-%m-%d').date()
+            data_venda = datetime.strptime(str(data_venda), '%Y-%m-%d').date()
         except ValueError:
             return jsonify({'success': False, 'error': 'Formato de data inválido (use AAAA-MM-DD)'}), 400
 
         if metodo_pagamento == 'pagamento_prazo':
             if not data_vencimento:
-                return jsonify({'success': False, 'error': 'Data de vencimento obrigatória'})
+                return jsonify({'success': False, 'error': 'Data de vencimento obrigatória'}), 400
             try:
-                vencimento = datetime.strptime(data_vencimento, '%Y-%m-%d').date()
+                vencimento = datetime.strptime(str(data_vencimento), '%Y-%m-%d').date()
             except ValueError:
                 return jsonify({'success': False, 'error': 'Formato de data de vencimento inválido (use AAAA-MM-DD)'}), 400
             if vencimento < datetime.today().date():
-                return jsonify({'success': False, 'error': 'Data de vencimento inválida'})
+                return jsonify({'success': False, 'error': 'Data de vencimento inválida'}), 400
 
         cliente_cpf = data.get('cpf')
         cliente_nome = data.get('nome_cliente')
         status_pagamento = 'pendente' if metodo_pagamento == 'pagamento_prazo' else 'pago'
 
+        agora = datetime.now()
         venda_data = {
-            'data_venda': data_venda,  # NOVO: Incluir data no payload
+            # Venda de hoje guarda a hora; venda lançada em outra data guarda só o dia
+            'data_venda': (agora.strftime('%Y-%m-%d %H:%M:%S') if data_venda == agora.date()
+                           else data_venda.isoformat()),
             'cliente_cpf': cliente_cpf,
             'cliente_nome': cliente_nome,
             'metodo_pagamento': metodo_pagamento,
-            'itens': data['itens'],
+            'itens': data.get('itens'),  # preço e total são calculados no servidor
             'status_pagamento': status_pagamento,
             'data_vencimento': data_vencimento,
             'observacao': data.get('observacao')
         }
-        venda_id = f"V{datetime.now():%Y%m%d%H%M%S}"
+        # Sufixo aleatório: duas vendas no mesmo segundo não colidem na chave
+        venda_id = f"V{datetime.now():%Y%m%d%H%M%S}-{uuid.uuid4().hex[:6].upper()}"
 
         try:
             processar_venda(venda_id, venda_data, user_id)
@@ -475,35 +706,14 @@ def nova_venda():
     # GET: Adicionar data atual como padrão
     produtos = listar_produtos_simples()
     current_date = datetime.now().strftime('%Y-%m-%d')
-    return render_template('vendas/nova.html', produtos=produtos, current_date=current_date)
+    return render_template('vendas/nova.html', produtos=produtos, current_date=current_date,
+                           formas_pagamento=FORMAS_PAGAMENTO)
 
-    
-@app.route('/vendas/pagamento_prazo/pagar/<venda_id>', methods=['POST'])
-@login_required
-@role_required('gerente')
-def pagar_pagamento_prazo(venda_id):
-    try:
-        with get_db_connection() as conn:
-            cursor = conn.execute(
-                """
-                UPDATE vendas
-                SET status_pagamento = 'pago'
-                WHERE id = ? 
-                  AND metodo_pagamento = 'pagamento_prazo' 
-                  AND status_pagamento = 'pendente'
-                """,
-                (venda_id,)
-            )
-            if cursor.rowcount == 0:
-                return redirect(url_for('listar_fiado', error='Venda não encontrada ou já paga'))
-            conn.commit()
-        return redirect(url_for('listar_fiado', success=True))
-    except Exception as e:
-        logging.error(f"Erro ao pagar fiado: {e}")
-        return redirect(url_for('listar_fiado', error='Erro ao processar pagamento'))
 
 # ---------------------------------------------------------------
 # Relatórios
+
+# Movimentação de caixa por dia: consulta compartilhada com o PDF (ver gerador_pdf.py)
 
 @app.route('/relatorios')
 @login_required
@@ -512,17 +722,58 @@ def relatorios():
     return render_template('relatorios/dashboard.html')
 
 
+# Colunas de cada relatório: (campo da consulta, título, formato).
+# Formatos: moeda, quantidade (até 3 casas, para kg), inteiro, data, texto.
+COLUNAS_RELATORIOS = {
+    'vendas_periodo': [('data', 'Data', 'data'), ('total_vendas', 'Vendas', 'inteiro'),
+                       ('valor_total', 'Valor total', 'moeda'), ('ticket_medio', 'Ticket médio', 'moeda')],
+    'vendas_categorias': [('categoria', 'Categoria', 'texto'),
+                          ('quantidade_vendida', 'Quantidade vendida', 'quantidade'),
+                          ('valor_total', 'Valor total', 'moeda')],
+    'top_produtos': [('nome', 'Produto', 'texto'), ('quantidade_vendida', 'Quantidade vendida', 'quantidade'),
+                     ('valor_total', 'Valor total', 'moeda')],
+    'estoque_nivel': [('nome', 'Produto', 'texto'), ('quantidade', 'Em estoque', 'quantidade'),
+                      ('estoque_minimo', 'Estoque mínimo', 'quantidade'), ('diferenca', 'Diferença', 'quantidade')],
+    'estoque_validade': [('nome', 'Produto', 'texto'), ('data_validade', 'Validade', 'data'),
+                         ('dias_restantes', 'Dias restantes', 'inteiro')],
+    'clientes_fieis': [('cliente_nome', 'Cliente', 'texto'), ('total_compras', 'Compras', 'inteiro'),
+                       ('valor_total_gasto', 'Valor gasto', 'moeda')],
+    'fornecedores_produtos': [('fornecedor', 'Fornecedor', 'texto'), ('total_produtos', 'Produtos', 'inteiro'),
+                              ('total_estoque', 'Itens em estoque', 'quantidade')],
+    'movimentacao_caixa': [('data', 'Data', 'data'), ('valor_a_vista', 'À vista', 'moeda'),
+                           ('valor_fiado_recebido', 'Fiado recebido', 'moeda'),
+                           ('total_entradas', 'Total recebido', 'moeda'),
+                           ('valor_vendido_a_prazo', 'Vendido a prazo', 'moeda')],
+    'comparativo': [('periodo', 'Período', 'texto'), ('total_vendas', 'Vendas', 'inteiro'),
+                    ('valor_total', 'Valor total', 'moeda')],
+}
+
+
 # Helper functions para relatórios
 def parse_date(date_str, default):
     try:
         return datetime.strptime(date_str, '%Y-%m-%d').date().isoformat()
-    except:
+    except (TypeError, ValueError):
         return default
 
+
+def _arg_inteiro(nome, padrao, minimo, maximo):
+    """Parâmetro inteiro da URL; valores inválidos viram o padrão e são limitados à faixa."""
+    valor = request.args.get(nome, padrao, type=int)
+    return max(minimo, min(maximo, valor))
+
+
 @app.route('/relatorios/<report_type>')
-@login_required # Assuming you have this decorator
-@role_required('gerente') # Assuming you have this decorator
+@login_required
+@role_required('gerente')
 def relatorios_unificados(report_type):
+    hoje = datetime.now().date()
+    inicio_periodo = parse_date(request.args.get('start_date'), hoje.replace(day=1).isoformat())
+    fim_periodo = parse_date(request.args.get('end_date'), hoje.isoformat())
+    limite = _arg_inteiro('limit', 10, 1, 100)
+    dias_validade = _arg_inteiro('dias', 30, 0, 3650)
+    agrupar_por_ano = request.args.get('periodo') == 'year'
+
     report_titles = {
         'vendas_totais': 'Vendas Totais',
         'vendas_periodo': 'Vendas por Período',
@@ -563,10 +814,7 @@ def relatorios_unificados(report_type):
                 WHERE DATE(v.data) BETWEEN ? AND ?
                 GROUP BY DATE(v.data) ORDER BY data
             ''',
-            'params': (
-                request.args.get('start_date', datetime.now().replace(day=1).date().isoformat()),
-                request.args.get('end_date', datetime.now().date().isoformat())
-            )
+            'params': (inicio_periodo, fim_periodo)
         },
         'vendas_categorias': {
             'query': '''
@@ -583,22 +831,22 @@ def relatorios_unificados(report_type):
                 FROM venda_itens vi JOIN produtos p ON vi.produto_id = p.id
                 GROUP BY p.id ORDER BY valor_total DESC LIMIT ?
             ''',
-            'params': (int(request.args.get('limit', 10)),)
+            'params': (limite,)
         },
         'estoque_nivel': {
             'query': '''
                 SELECT nome, quantidade, estoque_minimo, (quantidade - estoque_minimo) as diferenca
-                FROM produtos WHERE quantidade < estoque_minimo ORDER BY diferenca ASC
+                FROM produtos WHERE ativo = 1 AND quantidade < estoque_minimo ORDER BY diferenca ASC
             '''
         },
         'estoque_validade': {
             'query': '''
                 SELECT nome, data_validade,
-                JULIANDAY(data_validade) - JULIANDAY('now') as dias_restantes
-                FROM produtos WHERE data_validade IS NOT NULL
+                CAST(JULIANDAY(data_validade) - JULIANDAY(?) AS INTEGER) as dias_restantes
+                FROM produtos WHERE ativo = 1 AND data_validade IS NOT NULL
                 AND dias_restantes BETWEEN 0 AND ? ORDER BY data_validade
             ''',
-            'params': (int(request.args.get('dias', 30)),)
+            'params': (hoje.isoformat(), dias_validade)
         },
         'clientes_fieis': {
             'query': '''
@@ -606,7 +854,7 @@ def relatorios_unificados(report_type):
                 FROM vendas WHERE cliente_nome IS NOT NULL
                 GROUP BY cliente_nome ORDER BY total_compras DESC LIMIT ?
             ''',
-            'params': (int(request.args.get('limit', 10)),)
+            'params': (limite,)
         },
         'fornecedores_produtos': {
             'query': '''
@@ -615,13 +863,10 @@ def relatorios_unificados(report_type):
                 GROUP BY f.id ORDER BY total_produtos DESC
             '''
         },
+        # Entradas pela data em que o dinheiro entrou; fiado vendido é conta a receber,
+        # não saída de caixa
         'movimentacao_caixa': {
-            'query': '''
-                SELECT DATE(data) as data,
-                SUM(CASE WHEN metodo_pagamento = 'fiado' THEN 0 ELSE total END) as entradas,
-                SUM(CASE WHEN metodo_pagamento = 'fiado' THEN total ELSE 0 END) as saidas
-                FROM vendas GROUP BY DATE(data) ORDER BY data DESC
-            '''
+            'query': SQL_MOVIMENTACAO_CAIXA + ' ORDER BY data DESC'
         },
         'comparativo': {
             'query': '''
@@ -630,13 +875,14 @@ def relatorios_unificados(report_type):
                 FROM vendas GROUP BY periodo ORDER BY periodo DESC LIMIT 12
             ''',
             'params': (),
-            'pre_process': lambda: {'group_format': '%Y-%m' if request.args.get('periodo', 'month') == 'month' else '%Y'}
+            'pre_process': lambda: {'group_format': '%Y' if agrupar_por_ano else '%Y-%m'}
         }
     }
 
     config = reports.get(report_type)
     if not config:
         abort(404, description="Relatório não encontrado")
+    colunas = COLUNAS_RELATORIOS.get(report_type)
 
     with get_db_connection() as conn:
         cursor = conn.cursor()
@@ -655,9 +901,9 @@ def relatorios_unificados(report_type):
     if 'post_process' in config:
         dados = config['post_process'](dados)
 
-    # All reports now render HTML
     return render_template('relatorio_unificado.html',
                            dados=dados,
+                           colunas=colunas,
                            report_type=report_type,
                            titulo_relatorio=report_titles.get(report_type, 'Relatório'))
 
@@ -678,16 +924,8 @@ def relatorio_pdf():
 @login_required
 @role_required('gerente')
 def admin_usuarios():
-    success = request.args.get('success')
-    error = request.args.get('error')
-    # Usa a função do módulo banco_dados
     usuarios = [dict(u) for u in get_all_users()]
-    return render_template(
-        'admin/usuarios.html',
-        usuarios=usuarios,
-        success=success,
-        error=error
-    )
+    return render_template('admin/usuarios.html', usuarios=usuarios)
 
 @app.route('/admin/estoque')
 @login_required
@@ -697,7 +935,7 @@ def admin_estoque():
     produtos = get_all_produtos()
     estoque = [
         p for p in produtos
-        if p['quantidade'] < p['estoque_minimo']
+        if p['quantidade'] < (p['estoque_minimo'] or 0)
     ]
     return render_template('admin/estoque.html', estoque=estoque)
 
@@ -732,7 +970,8 @@ def novo_usuario():
                 {'user_id': user_id, 'username': username, 'role': role},
                 request=request
             )
-            return redirect(url_for('admin_usuarios', success=f'Usuário {username} criado com sucesso'))
+            flash(f'Usuário {username} criado com sucesso.', 'success')
+            return redirect(url_for('admin_usuarios'))
         except ValueError as ve:
             return render_template('admin/novo_usuario.html',
                                    error=str(ve),
@@ -745,66 +984,91 @@ def novo_usuario():
     return render_template('admin/novo_usuario.html')
 
 
+def _contar_gerentes_ativos(conn):
+    return conn.execute(
+        "SELECT COUNT(*) FROM users WHERE role = 'gerente' AND ativo = 1").fetchone()[0]
+
+
 @app.route('/admin/usuarios/editar/<int:id>', methods=['POST'])
 @login_required
 @role_required('gerente')
 def editar_usuario(id):
+    new_role = request.form.get('role')
+    if new_role not in ['gerente', 'funcionario']:
+        abort(400)
     try:
-        new_role = request.form.get('role')
-        if new_role not in ['gerente', 'funcionario']:
-            abort(400)
-        
-        # Impedir que o último gerente seja rebaixado
-        if new_role == 'funcionario':
-            with get_db_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'gerente'")
-                count_gerentes = cursor.fetchone()[0]
-                
-                if count_gerentes == 1:
-                    return redirect(url_for('admin_usuarios', error='Não pode rebaixar o último gerente'))
+        with get_db_connection() as conn:
+            usuario = conn.execute(
+                "SELECT username, role FROM users WHERE id = ? AND ativo = 1", (id,)).fetchone()
+            if usuario is None:
+                flash('Usuário não encontrado.', 'error')
+                return redirect(url_for('admin_usuarios'))
+            # Impedir que o último gerente seja rebaixado
+            if (usuario['role'] == 'gerente' and new_role == 'funcionario'
+                    and _contar_gerentes_ativos(conn) == 1):
+                flash('Não é possível rebaixar o último gerente.', 'error')
+                return redirect(url_for('admin_usuarios'))
 
         update_user_role(id, new_role)
-        return redirect(url_for('admin_usuarios'))
-    
+        registrar_log(session['user_id'], 'update_user_role', 'INFO',
+                      {'user_id': id, 'username': usuario['username'], 'role': new_role},
+                      request=request)
+        flash(f'Cargo de {usuario["username"]} atualizado.', 'success')
     except Exception as e:
-        logging.error(f"Erro ao atualizar usuário: {str(e)}")
-        return redirect(url_for('admin_usuarios', error='Erro ao atualizar usuário'))
+        logging.error(f"Erro ao atualizar usuário: {str(e)}", exc_info=True)
+        flash('Erro ao atualizar usuário.', 'error')
+    return redirect(url_for('admin_usuarios'))
 
 
 @app.route('/admin/usuarios/excluir/<int:id>', methods=['POST'])
 @login_required
 @role_required('gerente')
 def excluir_usuario(id):
-    try:
-        # Verificar se é o último administrador
-        with get_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT role FROM users WHERE id = ?", (id,))
-            user = cursor.fetchone()
-            
-            if user['role'] == 'gerente':
-                cursor.execute("SELECT COUNT(*) FROM users WHERE role = 'gerente'")
-                count_gerentes = cursor.fetchone()[0]
-                
-                if count_gerentes == 1:
-                    return redirect(url_for('admin_usuarios', error='Não pode excluir o último gerente'))
-
-        delete_user(id)
+    if id == session['user_id']:
+        flash('Você não pode excluir a própria conta.', 'error')
         return redirect(url_for('admin_usuarios'))
-    
+    try:
+        with get_db_connection() as conn:
+            user = conn.execute(
+                "SELECT username, role FROM users WHERE id = ? AND ativo = 1", (id,)).fetchone()
+            if user is None:
+                flash('Usuário não encontrado.', 'error')
+                return redirect(url_for('admin_usuarios'))
+            # Verificar se é o último gerente
+            if user['role'] == 'gerente' and _contar_gerentes_ativos(conn) == 1:
+                flash('Não é possível excluir o último gerente.', 'error')
+                return redirect(url_for('admin_usuarios'))
+
+        resultado = delete_user(id)
+        registrar_log(session['user_id'], 'delete_user', 'INFO',
+                      {'user_id': id, 'username': user['username'], 'resultado': resultado},
+                      request=request)
+        if resultado == 'desativado':
+            flash(f'Usuário {user["username"]} desativado: ele tem vendas registradas, '
+                  'que foram mantidas no histórico.', 'success')
+        else:
+            flash(f'Usuário {user["username"]} excluído.', 'success')
     except Exception as e:
-        logging.error(f"Erro ao excluir usuário: {str(e)}")
-        return redirect(url_for('admin_usuarios', error='Erro ao excluir usuário'))
+        logging.error(f"Erro ao excluir usuário: {str(e)}", exc_info=True)
+        flash('Erro ao excluir usuário.', 'error')
+    return redirect(url_for('admin_usuarios'))
 
 
 
 
 # Dashboard Principal
 
+def intervalo_de_hoje():
+    """(hoje, amanhã) em horário local, para filtrar 'data >= ? AND data < ?'.
+    O DATE('now') do SQLite é UTC: depois das 21h, no Brasil, já seria amanhã."""
+    hoje = datetime.now().date()
+    return hoje.isoformat(), (hoje + timedelta(days=1)).isoformat()
+
+
 @app.route('/dashboard')
 @login_required
 def dashboard():
+    hoje = intervalo_de_hoje()
     with get_db_connection() as conn:
         cursor = conn.cursor()
         is_gerente = session['role'] == 'gerente'
@@ -816,20 +1080,18 @@ def dashboard():
                 v.id, v.data, v.cliente_nome as cliente, v.total,
                 v.metodo_pagamento, v.status_pagamento
             FROM vendas v
-            WHERE DATE(v.data) = DATE('now')
+            WHERE v.data >= ? AND v.data < ?
             ORDER BY v.data DESC
-        ''')
+        ''', hoje)
         data['vendas_hoje'] = [dict(zip([column[0] for column in cursor.description], row)) 
                        for row in cursor.fetchall()]
 
-        
-        cursor.execute('SELECT SUM(total) as total FROM vendas WHERE DATE(data) = DATE("now")')
-        data['total_dia'] = cursor.fetchone()['total'] or 0
+        data['total_dia'] = round(sum(v['total'] or 0 for v in data['vendas_hoje']), 2)
 
         cursor.execute('''
             SELECT nome, quantidade, estoque_minimo
             FROM produtos
-            WHERE quantidade < estoque_minimo
+            WHERE ativo = 1 AND quantidade < estoque_minimo
             ORDER BY quantidade ASC
         ''')
         data['alertas_estoque'] = cursor.fetchall()
@@ -845,17 +1107,17 @@ def dashboard():
                     SUM(total) as total_receita_hoje,
                     AVG(total) as ticket_medio_hoje
                 FROM vendas 
-                WHERE DATE(data) = DATE('now')
-            ''')
+                WHERE data >= ? AND data < ?
+            ''', hoje)
             data.update(cursor.fetchone())
 
             cursor.execute('''
                 SELECT metodo_pagamento, COUNT(*) as quantidade,
                        SUM(total) as valor_total
                 FROM vendas
-                WHERE DATE(data) = DATE('now')
+                WHERE data >= ? AND data < ?
                 GROUP BY metodo_pagamento
-            ''')
+            ''', hoje)
             data['metodos_pagamento'] = cursor.fetchall()
 
             cursor.execute('''
@@ -895,10 +1157,13 @@ def listar_vendas_prazo():
 @login_required
 @role_required('gerente')
 def pagar_venda_prazo(venda_id):
-    sucesso = marcar_venda_pago(venda_id)
-    if not sucesso:
-        return redirect(url_for('listar_vendas_prazo', error='Venda não encontrada ou já paga'))
-    return redirect(url_for('listar_vendas_prazo', success=True))
+    if marcar_venda_pago(venda_id):
+        registrar_log(session['user_id'], 'pagar_fiado', 'INFO', {'venda_id': venda_id},
+                      request=request)
+        flash(f'Pagamento da venda {venda_id} registrado.', 'success')
+    else:
+        flash('Venda não encontrada, não é a prazo ou já estava paga.', 'error')
+    return redirect(url_for('listar_vendas_prazo'))
 
 @app.route('/vendas/listar_vendas_prazo/adicionar_observacao/<venda_id>', methods=['POST'])
 @login_required
@@ -906,7 +1171,8 @@ def pagar_venda_prazo(venda_id):
 def adicionar_observacao_venda_prazo(venda_id):
     observacao = request.form.get('observacao', '')
     adicionar_observacao_venda(venda_id, observacao)
-    return redirect(url_for('listar_vendas_prazo', success_obs=True))
+    flash('Observação salva.', 'success')
+    return redirect(url_for('listar_vendas_prazo'))
 
 
 # Utilitários
@@ -914,45 +1180,56 @@ def adicionar_observacao_venda_prazo(venda_id):
 @login_required
 @role_required('gerente')
 def visualizar_logs():
-    page = request.args.get('page', 1, type=int)
+    page = max(request.args.get('page', 1, type=int), 1)
     per_page = 20
-    search = request.args.get('search', '')
-    level = request.args.get('level', '')
-    user_id = request.args.get('user_id', '')
-    action = request.args.get('action', '')
-    start_date = request.args.get('start_date', '')
-    end_date = request.args.get('end_date', '')
-    
-    logs, total = listar_logs(
-        page=page,
-        per_page=per_page,
-        search=search,
-        level=level,
-        user_id=user_id,
-        action=action,
-        start_date=start_date,
-        end_date=end_date
-    )
-    
-    total_pages = (total + per_page - 1) // per_page
-    
+    filtros = {
+        campo: request.args.get(campo, '').strip()
+        for campo in ('search', 'level', 'user_id', 'action', 'start_date', 'end_date')
+    }
+
+    logs, total = listar_logs(page=page, per_page=per_page, **filtros)
+    total_pages = max((total + per_page - 1) // per_page, 1)
+    # Os cartões mostram a distribuição por nível, então ignoram o filtro de nível
+    contagem = contar_logs_por_nivel(
+        **{campo: valor for campo, valor in filtros.items() if campo != 'level'})
+
     # Obter nomes de usuários para o filtro
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id, username FROM users")
+        cursor.execute("SELECT id, username FROM users ORDER BY username")
         usuarios = {row['id']: row['username'] for row in cursor.fetchall()}
-    
-    return render_template('logs.html', 
-                           logs=logs, 
+
+    for log in logs:
+        log['usuario'] = _nome_usuario_log(log['user_id'], usuarios)
+        log['detalhes'] = _ler_detalhes_log(log['details'])
+
+    return render_template('logs.html',
+                           logs=logs,
+                           total=total,
                            page=page,
                            total_pages=total_pages,
-                           search=search,
-                           level=level,
-                           user_id=user_id,
-                           action=action,
-                           start_date=start_date,
-                           end_date=end_date,
-                           usuarios=usuarios)
+                           contagem=contagem,
+                           usuarios=usuarios,
+                           acoes=listar_acoes_logs(),
+                           filtros={campo: valor for campo, valor in filtros.items() if valor})
+
+
+def _nome_usuario_log(user_id, usuarios):
+    if user_id is None or user_id == '':
+        return '—'
+    try:
+        return usuarios.get(int(user_id), f'#{user_id}')
+    except (TypeError, ValueError):
+        return str(user_id)  # eventos do sistema gravam um texto, ex.: 'Sistema'
+
+
+def _ler_detalhes_log(details):
+    if not details:
+        return None
+    try:
+        return json.loads(details)
+    except ValueError:
+        return details
 
 @app.template_filter('format_currency')
 def format_currency(value):
@@ -962,6 +1239,49 @@ def format_currency(value):
         return "R$ 0,00"
 
 app.jinja_env.filters['format_currency'] = format_currency
+
+
+@app.template_filter('format_quantidade')
+def format_quantidade(value):
+    """Número com até 3 casas decimais e vírgula (2.357 -> '2,357'; 10.0 -> '10')."""
+    try:
+        return f"{float(value):.3f}".rstrip('0').rstrip('.').replace('.', ',')
+    except (TypeError, ValueError):
+        return '-'
+
+
+@app.template_filter('formatar_celula')
+def formatar_celula(valor, formato):
+    if valor is None or valor == '':
+        return '-'
+    if formato == 'moeda':
+        return format_currency(valor)
+    if formato == 'quantidade':
+        return format_quantidade(valor)
+    if formato == 'inteiro':
+        try:
+            return f"{int(round(float(valor))):,}".replace(',', '.')
+        except (TypeError, ValueError):
+            return valor
+    if formato == 'data':
+        return format_datetime(valor, '%d/%m/%Y')
+    return valor
+
+
+@app.template_filter('miniatura')
+def miniatura(foto):
+    """Caminho (relativo a static/) da miniatura da foto, ou da própria foto
+    enquanto a miniatura não existir."""
+    if not foto:
+        return ''
+    if os.path.exists(caminho_miniatura(app.config['UPLOAD_FOLDER'], foto)):
+        return f'uploads/produtos/{PASTA_MINIATURAS}/{os.path.basename(foto)}.webp'
+    return f'uploads/produtos/{foto}'
+
+
+@app.template_filter('forma_pagamento')
+def forma_pagamento(valor):
+    return FORMAS_PAGAMENTO.get(valor, valor or '—')
 
 def verificar_validades():
     """Verifica produtos próximos do vencimento"""
@@ -975,7 +1295,7 @@ def verificar_validades():
                 SELECT id, nome, data_validade,
                        JULIANDAY(data_validade) - JULIANDAY(?) AS dias_restantes
                 FROM produtos
-                WHERE data_validade BETWEEN ? AND ?
+                WHERE ativo = 1 AND data_validade BETWEEN ? AND ?
                 ORDER BY data_validade ASC
             ''', (hoje, hoje, limite))
             
@@ -998,24 +1318,10 @@ def verificar_validades():
     except Exception as e:
         logging.error(f"Erro na verificação de validades: {str(e)}", exc_info=True)
 
-# Agendar verificação diária
-scheduler = BackgroundScheduler(daemon=True)
-scheduler.add_job(verificar_validades, 'interval', hours=24)
+@app.errorhandler(403)
+def acesso_negado(e):
+    return render_template('errors/403.html'), 403
 
-if __name__ == '__main__':
-    try:
-        # Scheduler: backup automático a cada 24h
-        scheduler.add_job(backup_db, 'interval', hours=24)
-        
-        # Iniciar o scheduler
-        scheduler.start()
-        
-        backup_db()
-        verificar_validades()
-        app.run(debug=True)
-    except (KeyboardInterrupt, SystemExit):
-        scheduler.shutdown()
-        
 @app.errorhandler(404)
 def page_not_found(e):
     return render_template('errors/404.html'), 404
@@ -1023,3 +1329,41 @@ def page_not_found(e):
 @app.errorhandler(500)
 def internal_server_error(e):
     return render_template('errors/500.html'), 500
+
+
+scheduler = BackgroundScheduler(daemon=True)
+
+
+def iniciar_tarefas_agendadas():
+    """Verificação de validades na inicialização e a cada 24h. O backup é conferido
+    a cada hora, mas só é feito quando o último tem mais de 24h."""
+    scheduler.add_job(verificar_validades, 'interval', hours=24)
+    scheduler.add_job(backup_se_necessario, 'interval', hours=1)
+    # Miniaturas das fotos que ainda não têm (em segundo plano, não atrasa a abertura)
+    scheduler.add_job(gerar_miniaturas_faltantes, args=[app.config['UPLOAD_FOLDER']])
+    scheduler.start()
+    backup_se_necessario()
+    verificar_validades()
+
+
+def configuracao_execucao():
+    """Parâmetros do servidor lidos do ambiente. O modo debug expõe o debugger
+    do Werkzeug (execução de código pelo navegador), então só liga com FLASK_DEBUG=1."""
+    return {
+        'debug': os.environ.get('FLASK_DEBUG', '').strip().lower() in ('1', 'true', 'sim', 'yes'),
+        'host': os.environ.get('FLASK_RUN_HOST', '127.0.0.1'),
+        'port': int(os.environ.get('FLASK_RUN_PORT', 5000)),
+    }
+
+
+if __name__ == '__main__':
+    execucao = configuracao_execucao()
+    # Com o reloader do modo debug este bloco roda no processo pai e no filho;
+    # as tarefas só sobem no processo que atende as requisições.
+    if not execucao['debug'] or os.environ.get('WERKZEUG_RUN_MAIN') == 'true':
+        iniciar_tarefas_agendadas()
+    try:
+        app.run(**execucao)
+    finally:
+        if scheduler.running:
+            scheduler.shutdown()

@@ -25,6 +25,14 @@
             <i class="fas fa-chart-bar"></i>
             <span>Relatórios<br>Gerenciais</span>
         </a>
+        <a href="{{ url_for('admin_estoque') }}" class="big-button">
+            <i class="fas fa-exclamation-triangle"></i>
+            <span>Estoque<br>Baixo</span>
+        </a>
+        <a href="{{ url_for('visualizar_logs') }}" class="big-button">
+            <i class="fas fa-history"></i>
+            <span>Registro de<br>Atividades</span>
+        </a>
         {% endif %}
 
         <!-- Botões para Todos os Usuários -->
@@ -32,10 +40,12 @@
             <i class="fas fa-cash-register"></i>
             <span>Nova Venda<br>&nbsp;</span>
         </a>
+        {% if session.role == 'gerente' %}
         <a href="{{ url_for('listar_vendas_prazo') }}" class="big-button">
             <i class="fas fa-file-invoice-dollar"></i>
             <span>Vendas<br>a Prazo</span>
         </a>
+        {% endif %}
     </div>
 </div>
 {% endblock %}

@@ -11,9 +11,13 @@ node_modules/
 venv/
 .venv/
 
-# Bancos de dados locais / instancia
+# Bancos de dados locais / instancia (dados reais e hashes de senha: nunca versionar)
 instance/
+*.db
 *.db-journal
+*.db-wal
+*.db-shm
+testdb
 
 # Backups locais
 backups/
@@ -21,3 +25,6 @@ backups/
 # IDE
 .vscode/
 .idea/
+
+# Miniaturas geradas a partir das fotos (imagens.py)
+static/uploads/produtos/miniaturas/

@@ -1,0 +1,45 @@
+{% extends 'base.html' %}
+
+{% block title %}Estoque Baixo - Açougue{% endblock %}
+
+{% block content %}
+<div class="dashboard-container">
+    <h2><i class="fas fa-exclamation-triangle"></i> Produtos abaixo do estoque mínimo</h2>
+
+    <div class="table-responsive">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Produto</th>
+                    <th>Categoria</th>
+                    <th>Fornecedor</th>
+                    <th>Em estoque</th>
+                    <th>Mínimo</th>
+                    <th>Faltam</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in estoque %}
+                {% set unidade = 'kg' if p.tipo_venda == 'quilo' else 'unid.' %}
+                <tr>
+                    <td>{{ p.nome }}</td>
+                    <td>{{ p.categoria }}</td>
+                    <td>{{ p.fornecedor or '–' }}</td>
+                    <td>{{ (p.quantidade)|format_quantidade }} {{ unidade }}</td>
+                    <td>{{ (p.estoque_minimo or 0)|format_quantidade }} {{ unidade }}</td>
+                    <td>{{ ((p.estoque_minimo or 0) - p.quantidade)|format_quantidade }} {{ unidade }}</td>
+                    <td>
+                        <a href="{{ url_for('editar_produto', id=p.id) }}" class="btn btn-primary">Editar</a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="7" style="text-align:center;">Nenhum produto abaixo do estoque mínimo.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

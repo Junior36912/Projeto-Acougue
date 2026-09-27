@@ -5,11 +5,12 @@ from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
 from reportlab.lib.units import inch
 from datetime import datetime
-import sqlite3
 from io import BytesIO
 from flask import make_response
-from contextlib import contextmanager
 import os
+
+# Mesma conexão do sistema (respeita DB_PATH), em vez de um 'acougue.db' fixo
+from banco_dados import get_db_connection
 
 def get_custom_styles():
     styles = getSampleStyleSheet()
@@ -26,15 +27,28 @@ def get_custom_styles():
     
     return styles
 
-@contextmanager
-def get_db_connection():
-    conn = sqlite3.connect('acougue.db')
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    try:
-        yield conn
-    finally:
-        conn.close()
+
+# Mesma consulta da tela de relatórios (app.py importa daqui)
+SQL_MOVIMENTACAO_CAIXA = """
+    SELECT dia AS data,
+           ROUND(SUM(CASE WHEN tipo = 'a_vista' THEN valor ELSE 0 END), 2) AS valor_a_vista,
+           ROUND(SUM(CASE WHEN tipo = 'fiado_recebido' THEN valor ELSE 0 END), 2) AS valor_fiado_recebido,
+           ROUND(SUM(CASE WHEN tipo != 'fiado_vendido' THEN valor ELSE 0 END), 2) AS total_entradas,
+           ROUND(SUM(CASE WHEN tipo = 'fiado_vendido' THEN valor ELSE 0 END), 2) AS valor_vendido_a_prazo
+    FROM (
+        SELECT DATE(data_pagamento) AS dia, total AS valor,
+               CASE WHEN metodo_pagamento = 'pagamento_prazo'
+                    THEN 'fiado_recebido' ELSE 'a_vista' END AS tipo
+        FROM vendas
+        WHERE status_pagamento = 'pago' AND data_pagamento IS NOT NULL
+        UNION ALL
+        SELECT DATE(data), total, 'fiado_vendido'
+        FROM vendas
+        WHERE metodo_pagamento = 'pagamento_prazo'
+    )
+    GROUP BY dia
+"""
+
 
 def format_currency(value):
     return f"R$ {float(value):,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
@@ -67,7 +81,7 @@ def gerar_pdf_completo():
         cursor.execute('''
             SELECT DATE(data) as data, COUNT(*) as total_vendas, SUM(total) as valor_total, AVG(total) as ticket_medio
             FROM vendas
-            WHERE DATE(data) BETWEEN DATE('now', '-30 days') AND DATE('now')
+            WHERE DATE(data) BETWEEN DATE('now', 'localtime', '-30 days') AND DATE('now', 'localtime')
             GROUP BY DATE(data)
             ORDER BY data
         ''')
@@ -145,7 +159,7 @@ def gerar_pdf_completo():
         cursor = conn.cursor()
         cursor.execute('''
             SELECT cliente_nome, total, data_vencimento,
-                   CASE WHEN data_vencimento < DATE('now') THEN 'Vencido' ELSE 'A Vencer' END as status
+                   CASE WHEN data_vencimento < DATE('now', 'localtime') THEN 'Vencido' ELSE 'A Vencer' END as status
             FROM vendas
             WHERE status_pagamento = 'pendente'
             ORDER BY data_vencimento
@@ -188,7 +202,7 @@ def gerar_pdf_completo():
         cursor.execute('''
             SELECT nome, quantidade, estoque_minimo, (quantidade - estoque_minimo) as diferenca
             FROM produtos
-            WHERE quantidade < estoque_minimo
+            WHERE ativo = 1 AND quantidade < estoque_minimo
             ORDER BY diferenca ASC
         ''')
         estoque_nivel = cursor.fetchall()
@@ -304,28 +318,23 @@ def gerar_pdf_completo():
     # 6. Relatórios Operacionais
     elements.append(Paragraph("6. Relatórios Operacionais", styles['Header']))
     
-    # Movimentação de Caixa
+    # Movimentação de Caixa: entradas pela data do pagamento; fiado vendido é a receber
     with get_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute('''
-            SELECT DATE(data) as data,
-                   SUM(CASE WHEN metodo_pagamento = 'fiado' THEN 0 ELSE total END) as entradas,
-                   SUM(CASE WHEN metodo_pagamento = 'fiado' THEN total ELSE 0 END) as saidas
-            FROM vendas
-            WHERE DATE(data) BETWEEN DATE('now', '-7 days') AND DATE('now')
-            GROUP BY DATE(data)
+        cursor.execute(SQL_MOVIMENTACAO_CAIXA + """
+            HAVING dia BETWEEN DATE('now', 'localtime', '-7 days') AND DATE('now', 'localtime')
             ORDER BY data DESC
-        ''')
+        """)
         movimentacao = cursor.fetchall()
     
-    data = [['Data', 'Entradas', 'Saídas', 'Saldo']]
+    data = [['Data', 'À vista', 'Fiado recebido', 'Total recebido', 'Vendido a prazo']]
     for row in movimentacao:
-        saldo = row['entradas'] - row['saidas']
         data.append([
             row['data'],
-            format_currency(row['entradas']),
-            format_currency(row['saidas']),
-            format_currency(saldo)
+            format_currency(row['valor_a_vista']),
+            format_currency(row['valor_fiado_recebido']),
+            format_currency(row['total_entradas']),
+            format_currency(row['valor_vendido_a_prazo'])
         ])
     
     elements.append(Paragraph("Movimentação de Caixa (Últimos 7 dias)", styles['Body']))
@@ -340,8 +349,7 @@ def gerar_pdf_completo():
         ('FONTSIZE', (0, 0), (-1, 0), 10),
         ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
         ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-        ('TEXTCOLOR', (3, 1), (3, -1), lambda r, c, v: colors.green if float(v.replace('R$', '').replace(',', '')) > 0 else colors.red)
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
     ]))
     elements.append(t)
     elements.append(Spacer(1, 0.3*inch))

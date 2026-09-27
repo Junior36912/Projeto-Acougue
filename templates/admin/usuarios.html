@@ -9,13 +9,6 @@
         </a>
     </div>
     
-    {% if success %}
-        <div class="alert alert-success">{{ success }}</div>
-    {% endif %}
-    
-    {% if error %}
-        <div class="alert alert-danger">{{ error }}</div>
-    {% endif %}
    
     <div class="table-responsive">
         <table class="table table-hover">
@@ -35,8 +28,9 @@
                     <td>
                         <form method="POST" action="{{ url_for('editar_usuario', id=usuario.id) }}">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                            <select name="role" class="form-select" 
-                                    onchange="this.form.submit()"
+                            <select name="role" class="form-select" aria-label="Cargo de {{ usuario.username }}"
+                                    data-nome="{{ usuario.username }}"
+                                    onchange="if (confirm('Alterar o cargo de ' + this.dataset.nome + '?')) { this.form.submit(); } else { this.form.reset(); }"
                                     style="width: auto; display: inline-block;">
                                 <option value="gerente" {% if usuario.role == 'gerente' %}selected{% endif %}>
                                     Gerente
@@ -51,7 +45,7 @@
                         <form method="POST" action="{{ url_for('excluir_usuario', id=usuario.id) }}"
                               onsubmit="return confirm('Tem certeza que deseja excluir este usuário?');">
                             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"/>
-                            <button type="submit" class="btn btn-danger btn-sm">
+                            <button type="submit" class="btn btn-danger btn-sm" aria-label="Excluir {{ usuario.username }}">
                                 <i class="fas fa-trash"></i>
                             </button>
                         </form>

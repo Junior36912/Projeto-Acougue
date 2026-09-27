@@ -1,67 +1,40 @@
-from contextlib import contextmanager
 import unittest
-import sqlite3
 import os
-from datetime import datetime
+import shutil
+import tempfile
 from banco_dados import (
     init_db, create_user, get_user_by_id, update_user, delete_user,
     create_fornecedor, get_fornecedor_by_id, update_fornecedor, delete_fornecedor,
     create_produto, get_produto_by_id, update_produto, excluir_produto,
     processar_venda, get_venda_by_id, get_venda_items, delete_venda,
-    get_all_produtos, listar_produtos_simples
+    get_all_produtos, listar_produtos_simples, get_db_connection
 )
 from werkzeug.security import check_password_hash
 from unittest.mock import patch, MagicMock
 
-@contextmanager
-def get_db_connection():
-    db_path = os.environ.get('DB_PATH', 'acougue.db')
-    # Construct URI for in-memory shared database
-    uri = f'file:{db_path}?mode=memory&cache=shared'
-    conn = sqlite3.connect(uri, uri=True)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    try:
-        yield conn
-    finally:
-        conn.close()
-
 
 class TestBase(unittest.TestCase):
     def setUp(self):
-        # Use in-memory database with shared cache
-        os.environ['DB_PATH'] = 'testdb'
-        self.upload_folder = '/tmp/uploads'
-        os.environ['UPLOADER_FOLDER'] = self.upload_folder
-        os.makedirs(self.upload_folder, exist_ok=True)
-        
-        # Open a persistent connection to keep the in-memory DB alive
-        self.conn = sqlite3.connect(
-            'file:testdb?mode=memory&cache=shared', 
-            uri=True,
-            check_same_thread=False  # Allows connection to be used across threads if needed
-        )
-        self.conn.execute("PRAGMA foreign_keys = ON")
-        # Initialize the database schema
+        # Banco e uploads em pasta temporária própria de cada teste
+        self.pasta = tempfile.mkdtemp(prefix='acougue-integracao-')
+        self.db_anterior = os.environ.get('DB_PATH')
+        os.environ['DB_PATH'] = os.path.join(self.pasta, 'teste.db')
+        self.upload_folder = os.path.join(self.pasta, 'uploads')
+        os.makedirs(self.upload_folder)
         init_db()
 
     def tearDown(self):
-        # Close the persistent connection
-        self.conn.close()
-        # Cleanup uploaded files
-        for filename in os.listdir(self.upload_folder):
-            file_path = os.path.join(self.upload_folder, filename)
-            try:
-                os.unlink(file_path)
-            except Exception as e:
-                print(f"Error deleting file {file_path}: {e}")
+        if self.db_anterior is None:
+            os.environ.pop('DB_PATH', None)
+        else:
+            os.environ['DB_PATH'] = self.db_anterior
+        shutil.rmtree(self.pasta, ignore_errors=True)
 
 class TestUserDB(TestBase):
     def test_create_user_success(self):
-        # Adicione o parâmetro 'admin' explicitamente
-        user_id = create_user('testuser', 'test@example.com', 'senha1234', 'admin')
+        user_id = create_user('testuser', 'test@example.com', 'senha1234', 'gerente')
         user = get_user_by_id(user_id)
-        self.assertEqual(user['role'], 'admin')  # Agora deve passar
+        self.assertEqual(user['role'], 'gerente')
 
     def test_create_user_duplicate_username(self):
         create_user('user1', 'email1@test.com', 'senha1234')  # Senha >= 8
@@ -178,7 +151,7 @@ class TestVendaDB(TestBase):
             'metodo_pagamento': 'dinheiro',
             'itens': [{'id': self.produto_id, 'quantidade': 150, 'preco': 15.0}]
         }
-        with self.assertRaises(Exception):
+        with self.assertRaises(ValueError):
             processar_venda('venda_2', venda_data, self.user_id)
         
         produto = get_produto_by_id(self.produto_id)
